@@ -5,6 +5,8 @@
 #include "can/can_driver.h"
 #include "can/can_parser.h"
 #include "can/can_logger.h"
+#include "network/wifi_manager.h"
+#include "network/web_server.h"
 
 // Global objects
 SettingsManager settingsManager;
@@ -100,12 +102,44 @@ void setup() {
     );
 
     Serial.println("System initialized successfully!");
-    Serial.println("=================================\n");
+    Serial.println("=================================");
+    Serial.println("Type 'help' for available commands\n");
 }
 
 void loop() {
     // Main loop runs on core 1
     // Most work is done in FreeRTOS tasks
+
+    // Check for serial commands
+    static String serialCommand = "";
+    while (Serial.available()) {
+        char c = Serial.read();
+        if (c == '\n' || c == '\r') {
+            if (serialCommand.length() > 0) {
+                serialCommand.trim();
+
+                if (serialCommand == "reset_wifi" || serialCommand == "clear_wifi") {
+                    Serial.println("\n=== Clearing WiFi Configuration ===");
+                    settingsManager.clearNVS();
+                    Serial.println("WiFi settings cleared. Rebooting in 2 seconds...");
+                    delay(2000);
+                    ESP.restart();
+                } else if (serialCommand == "help") {
+                    Serial.println("\n=== Available Commands ===");
+                    Serial.println("  reset_wifi / clear_wifi - Clear WiFi credentials and reboot");
+                    Serial.println("  help - Show this help message");
+                    Serial.println("==========================\n");
+                } else {
+                    Serial.printf("Unknown command: %s (type 'help' for available commands)\n",
+                                 serialCommand.c_str());
+                }
+
+                serialCommand = "";
+            }
+        } else {
+            serialCommand += c;
+        }
+    }
 
     // Update battery manager
     batteryManager.update();
@@ -227,14 +261,85 @@ void setupSensors() {
 
 void setupNetwork() {
     Serial.println("Initializing network...");
-    // TODO: Initialize WiFi and MQTT
-    Serial.println("Network initialized (placeholder)");
+
+    const Settings& settings = settingsManager.getSettings();
+
+    // Initialize WiFi manager
+    wifiManager.begin();
+    wifiManager.setAutoReconnect(true);
+
+    // Set up WiFi state callback
+    wifiManager.setStateCallback([](WiFiState state) {
+        switch (state) {
+            case WiFiState::CONNECTED:
+                digitalWrite(PIN_STATUS_LED, HIGH);
+                Serial.printf("WiFi connected: %s\n", wifiManager.getLocalIP().toString().c_str());
+                break;
+            case WiFiState::DISCONNECTED:
+            case WiFiState::CONNECTING:
+                digitalWrite(PIN_STATUS_LED, LOW);
+                break;
+            case WiFiState::AP_MODE:
+                Serial.printf("AP Mode: %s\n", wifiManager.getAPIP().toString().c_str());
+                break;
+            default:
+                break;
+        }
+    });
+
+    // Generate AP SSID with unique suffix from MAC
+    String ap_ssid = String(WIFI_AP_SSID_PREFIX) + WiFi.macAddress().substring(12);
+    ap_ssid.replace(":", "");
+
+    // Determine connection mode
+    if (strlen(settings.wifi_ssid) > 0) {
+        // Try STA mode with configured credentials
+        Serial.printf("Attempting to connect to WiFi: %s\n", settings.wifi_ssid);
+
+        // Start AP+STA mode for fallback configuration
+        wifiManager.startAPSTA(
+            settings.wifi_ssid,
+            settings.wifi_password,
+            ap_ssid.c_str(),
+            WIFI_AP_PASSWORD
+        );
+
+        // Wait for STA connection or timeout
+        uint32_t start = millis();
+        while (!wifiManager.isConnected() && (millis() - start) < WIFI_CONNECTION_TIMEOUT) {
+            delay(100);
+            if ((millis() - start) % 1000 < 100) Serial.print(".");
+        }
+        Serial.println();
+
+        if (wifiManager.isConnected()) {
+            Serial.printf("Connected to %s, IP: %s\n", settings.wifi_ssid, wifiManager.getLocalIP().toString().c_str());
+        } else {
+            Serial.println("STA connection failed, AP mode available for configuration");
+        }
+    } else {
+        // No credentials configured, start AP only
+        Serial.println("No WiFi configured, starting AP mode...");
+        wifiManager.startAP(ap_ssid.c_str(), WIFI_AP_PASSWORD);
+        Serial.printf("Connect to '%s' with password '%s' to configure\n", ap_ssid.c_str(), WIFI_AP_PASSWORD);
+    }
+
+    Serial.println("Network initialized");
 }
 
 void setupWebServer() {
     Serial.println("Initializing web server...");
-    // TODO: Initialize async web server
-    Serial.println("Web server initialized (placeholder)");
+
+    // Initialize web server with dependencies
+    webServer.begin(&settingsManager, &batteryManager, &canLogger);
+
+    // Set up WebSocket client callback
+    webServer.setClientCallback([](uint32_t client_id, bool connected) {
+        Serial.printf("WebSocket client %u %s\n", client_id, connected ? "connected" : "disconnected");
+    });
+
+    Serial.printf("Web server started on port %d\n", WEB_SERVER_PORT);
+    Serial.println("Web server initialized");
 }
 
 // FreeRTOS Tasks
@@ -307,14 +412,40 @@ void networkTask(void* parameter) {
     Serial.println("Network task started");
 
     const Settings& settings = settingsManager.getSettings();
-    TickType_t publishInterval = pdMS_TO_TICKS(settings.publish_interval_ms);
+    TickType_t webRefreshInterval = pdMS_TO_TICKS(settings.web_refresh_ms);
+
+    uint32_t last_battery_broadcast = 0;
+    uint32_t last_system_broadcast = 0;
+    uint32_t last_wifi_check = 0;
 
     while (true) {
-        // TODO: Handle network operations
-        // - Check WiFi connection
-        // - Publish MQTT messages
-        // - Send WebSocket updates
+        uint32_t now = millis();
 
-        vTaskDelay(publishInterval);
+        // Update WiFi manager (handles auto-reconnect)
+        if (now - last_wifi_check > 1000) {  // Check every second
+            wifiManager.update();
+            last_wifi_check = now;
+        }
+
+        // Only broadcast if WiFi is connected
+        if (wifiManager.isConnected() || wifiManager.isAPActive()) {
+            // Broadcast battery updates via WebSocket
+            if (now - last_battery_broadcast > settings.web_refresh_ms) {
+                webServer.broadcastBatteryUpdate();
+                last_battery_broadcast = now;
+            }
+
+            // Broadcast system status less frequently (every 5 seconds)
+            if (now - last_system_broadcast > 5000) {
+                webServer.broadcastSystemStatus();
+                last_system_broadcast = now;
+            }
+        }
+
+        // TODO: Handle MQTT publishing (when implemented)
+        // - Publish battery status to MQTT broker
+        // - Publish system status
+
+        vTaskDelay(webRefreshInterval);
     }
 }

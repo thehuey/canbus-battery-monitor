@@ -5,10 +5,12 @@ Get up and running with the eBike Battery CANBUS Monitor in 5 minutes.
 ## Hardware You Need
 
 **Minimum:**
+
 - ESP32 development board
 - USB cable
 
 **For Full Testing:**
+
 - TJA1050 CAN transceiver module
 - Breadboard and jumper wires
 - 120Ω resistor
@@ -98,6 +100,7 @@ pio run --target upload
 ```
 
 **Troubleshooting Upload:**
+
 - Press and hold **BOOT** button on ESP32
 - Click **Upload**
 - Wait for "Connecting..."
@@ -177,6 +180,7 @@ pio device monitor
 ```
 
 You should see:
+
 - ✓ Settings loaded
 - ✓ Settings modified
 - ✓ Settings saved
@@ -193,11 +197,13 @@ pio device monitor
 ```
 
 You should see:
+
 - ✓ CAN driver initialized
 - Test messages sent every 2 seconds
 - Statistics every 10 seconds
 
 **Interactive commands:**
+
 - Press **`e`** to export CAN log
 - Press **`c`** to clear log
 - Press **`r`** to reset statistics
@@ -213,6 +219,7 @@ pio device monitor
 ```
 
 You should see:
+
 - ✓ 2 batteries initialized
 - Simulated discharge cycle
 - Battery status every 5 seconds
@@ -241,6 +248,7 @@ Add 120Ω resistor between CANH and CANL if this is the end of the bus.
 ### Verify Connection
 
 With CAN hardware connected, you should see:
+
 - No bus-off errors
 - Messages on CAN bus (if other devices present)
 - CAN logger capturing traffic
@@ -252,6 +260,7 @@ With CAN hardware connected, you should see:
 ### Build Fails
 
 **"Library not found"**
+
 ```bash
 # Clean and rebuild
 rm -rf .pio
@@ -259,6 +268,7 @@ pio run
 ```
 
 **"Platform not installed"**
+
 ```bash
 pio pkg install --platform espressif32
 ```
@@ -266,11 +276,18 @@ pio pkg install --platform espressif32
 ### Upload Fails
 
 **"Serial port not found"**
+
 - Check USB cable supports data (not just charging)
 - Install USB-to-Serial drivers (CP2102, CH340, or FTDI)
 - Try different USB port
+- Open WSL terminal in Windows, execute
+  ```bash
+  modprobe cp210x
+  chmod 666 /dev/ttyUSB0
+  ```
 
 **"Failed to connect"**
+
 - Hold BOOT button during upload
 - Try lower speed: Add to platformio.ini:
   ```ini
@@ -278,6 +295,7 @@ pio pkg install --platform espressif32
   ```
 
 **Linux permission denied**
+
 ```bash
 sudo usermod -a -G dialout $USER
 # Log out and back in
@@ -286,15 +304,18 @@ sudo usermod -a -G dialout $USER
 ### Runtime Issues
 
 **"Guru Meditation Error"**
+
 - Normal during development
 - Check serial output for details
 - Press EN/RST button to restart
 
 **"SPIFFS mount failed"**
+
 - First boot only, creates filesystem
 - If persists: `pio run --target erase`
 
 **"CAN bus-off"**
+
 - Normal without CAN hardware
 - With hardware: check termination, bitrate, wiring
 
@@ -336,17 +357,20 @@ pio run --target erase
 ## What's Working Right Now
 
 ✅ **Settings Manager**
+
 - Load/save configuration to NVS flash
 - Factory defaults
 - Multi-battery settings
 
 ✅ **CAN Driver**
+
 - 500 kbps TWAI interface
 - Message send/receive
 - CSV logging to SPIFFS
 - Bus-off recovery
 
 ✅ **Battery Manager**
+
 - 1-5 battery support
 - Voltage, current, power tracking
 - Health monitoring
@@ -357,17 +381,20 @@ pio run --target erase
 ## What's Not Yet Implemented
 
 ⚠️ **Sensors**
+
 - ACS712 current sensing
 - Voltage measurement
 - ADC calibration
 
 ⚠️ **Network**
+
 - WiFi connectivity
 - MQTT publishing
 - Web dashboard
 - WebSocket updates
 
 ⚠️ **Web Interface**
+
 - HTML dashboard
 - Real-time graphs
 - Configuration UI

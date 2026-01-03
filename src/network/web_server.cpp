@@ -1,0 +1,727 @@
+#include "web_server.h"
+#include "../config/config.h"
+#include "../config/settings.h"
+#include "../battery/battery_manager.h"
+#include "../can/can_logger.h"
+#include <SPIFFS.h>
+
+// Global instance
+WebServer webServer;
+
+WebServer::WebServer(uint16_t port)
+    : server_(port)
+    , ws_("/ws")
+    , port_(port)
+    , settings_(nullptr)
+    , batteries_(nullptr)
+    , can_logger_(nullptr)
+    , client_callback_(nullptr)
+    , request_count_(0)
+    , ws_messages_sent_(0) {
+}
+
+WebServer::~WebServer() {
+    stop();
+}
+
+bool WebServer::begin(SettingsManager* settings, BatteryManager* batteries, CANLogger* canLog) {
+    settings_ = settings;
+    batteries_ = batteries;
+    can_logger_ = canLog;
+
+    Serial.printf("[WebServer] Starting on port %d\n", port_);
+
+    // Initialize SPIFFS for static files
+    if (!SPIFFS.begin(true)) {
+        Serial.println("[WebServer] Warning: SPIFFS mount failed, no static files will be served");
+    }
+
+    // Setup handlers
+    setupWebSocket();
+    setupStaticFiles();
+    setupAPIEndpoints();
+
+    // Start server
+    server_.begin();
+    Serial.println("[WebServer] Server started");
+
+    return true;
+}
+
+void WebServer::stop() {
+    ws_.closeAll();
+    server_.end();
+    Serial.println("[WebServer] Server stopped");
+}
+
+void WebServer::setupWebSocket() {
+    ws_.onEvent([this](AsyncWebSocket* server, AsyncWebSocketClient* client,
+                       AwsEventType type, void* arg, uint8_t* data, size_t len) {
+        this->onWSEvent(server, client, type, arg, data, len);
+    });
+
+    server_.addHandler(&ws_);
+    Serial.println("[WebServer] WebSocket handler registered at /ws");
+}
+
+void WebServer::setupStaticFiles() {
+    // Serve index.html at root
+    server_.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+        if (SPIFFS.exists("/web/index.html")) {
+            request->send(SPIFFS, "/web/index.html", "text/html");
+        } else if (SPIFFS.exists("/index.html")) {
+            request->send(SPIFFS, "/index.html", "text/html");
+        } else {
+            // Fallback inline minimal page
+            String html = "<!DOCTYPE html><html><head><title>eBike Monitor</title></head>"
+                         "<body><h1>eBike Battery Monitor</h1>"
+                         "<p>Web interface files not found. Upload filesystem with: pio run --target uploadfs</p>"
+                         "<h2>API Endpoints</h2>"
+                         "<ul>"
+                         "<li><a href='/api/status'>/api/status</a></li>"
+                         "<li><a href='/api/batteries'>/api/batteries</a></li>"
+                         "<li><a href='/api/canlog'>/api/canlog</a></li>"
+                         "<li><a href='/api/config'>/api/config</a></li>"
+                         "</ul></body></html>";
+            request->send(200, "text/html", html);
+        }
+    });
+
+    // Serve static files from SPIFFS /web directory
+    server_.serveStatic("/", SPIFFS, "/web/").setDefaultFile("index.html");
+
+    // Also try root of SPIFFS for simpler setups
+    server_.serveStatic("/static/", SPIFFS, "/");
+}
+
+void WebServer::setupAPIEndpoints() {
+    // GET /api/status - System and battery status
+    server_.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleGetStatus(request);
+    });
+
+    // GET /api/batteries - All battery data
+    server_.on("/api/batteries", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleGetBatteries(request);
+    });
+
+    // GET /api/battery/:id - Single battery data
+    server_.on("^\\/api\\/battery\\/(\\d+)$", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        uint8_t id = request->pathArg(0).toInt();
+        handleGetBattery(request, id);
+    });
+
+    // GET /api/canlog - CAN message log
+    server_.on("/api/canlog", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleGetCANLog(request);
+    });
+
+    // GET /api/canlog/download - Download CAN log as CSV
+    server_.on("/api/canlog/download", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleDownloadCANLog(request);
+    });
+
+    // POST /api/canlog/clear - Clear CAN log
+    server_.on("/api/canlog/clear", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleClearCANLog(request);
+    });
+
+    // GET /api/config - Current configuration
+    server_.on("/api/config", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleGetConfig(request);
+    });
+
+    // POST /api/config - Update configuration
+    server_.on("/api/config", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},  // Empty - handled in body callback
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            if (index == 0) {
+                request_count_++;
+                handlePostConfig(request, data, len);
+            }
+        }
+    );
+
+    // POST /api/config/battery/:id - Update single battery config
+    server_.on("^\\/api\\/config\\/battery\\/(\\d+)$", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},  // Handled in body handler
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            if (index == 0) {
+                request_count_++;
+                uint8_t id = request->pathArg(0).toInt();
+                handlePostBatteryConfig(request, id, data, len);
+            }
+        }
+    );
+
+    // POST /api/calibrate/:id - Calibrate current sensor
+    server_.on("^\\/api\\/calibrate\\/(\\d+)$", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        uint8_t id = request->pathArg(0).toInt();
+        handleCalibrate(request, id);
+    });
+
+    // POST /api/reset - Reboot device
+    server_.on("/api/reset", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleReset(request);
+    });
+
+    // Handle 404
+    server_.onNotFound([this](AsyncWebServerRequest* request) {
+        handleNotFound(request);
+    });
+
+    Serial.println("[WebServer] API endpoints registered");
+}
+
+// API Handlers
+void WebServer::handleGetStatus(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    buildStatusJSON(doc.to<JsonObject>());
+    sendJSON(request, doc);
+}
+
+void WebServer::handleGetBatteries(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    buildAllBatteriesJSON(doc.to<JsonObject>());
+    sendJSON(request, doc);
+}
+
+void WebServer::handleGetBattery(AsyncWebServerRequest* request, uint8_t id) {
+    if (batteries_ == nullptr || id >= MAX_BATTERY_MODULES) {
+        sendError(request, 404, "Battery not found");
+        return;
+    }
+
+    const BatteryModule* battery = batteries_->getBattery(id);
+    if (battery == nullptr) {
+        sendError(request, 404, "Battery not found");
+        return;
+    }
+
+    JsonDocument doc;
+    buildBatteryJSON(doc.to<JsonObject>(), id);
+    sendJSON(request, doc);
+}
+
+void WebServer::handleGetCANLog(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+
+    // Check for filter parameter
+    uint32_t filter_id = 0;
+    bool has_filter = false;
+    if (request->hasParam("filter")) {
+        String filter = request->getParam("filter")->value();
+        filter_id = strtoul(filter.c_str(), nullptr, 0);  // Auto-detect hex or dec
+        has_filter = true;
+    }
+
+    // Limit parameter
+    size_t limit = 100;
+    if (request->hasParam("limit")) {
+        int l = request->getParam("limit")->value().toInt();
+        if (l > 0 && l <= 1000) limit = l;
+    }
+
+    JsonArray messages = doc["messages"].to<JsonArray>();
+
+    if (can_logger_ != nullptr) {
+        // Allocate buffer for messages
+        CANMessage* buffer = new CANMessage[limit];
+        size_t count = 0;
+
+        bool success;
+        if (has_filter) {
+            success = can_logger_->getFilteredMessages(buffer, count, limit, filter_id);
+        } else {
+            success = can_logger_->getRecentMessages(buffer, count, limit);
+        }
+
+        if (success) {
+            for (size_t i = 0; i < count; i++) {
+                const CANMessage& msg = buffer[i];
+                JsonObject obj = messages.add<JsonObject>();
+
+                char id_str[12];
+                snprintf(id_str, sizeof(id_str), "0x%03X", msg.id);
+                obj["id"] = id_str;
+                obj["dlc"] = msg.dlc;
+
+                String hex = "";
+                for (int j = 0; j < msg.dlc; j++) {
+                    char byte_hex[3];
+                    snprintf(byte_hex, sizeof(byte_hex), "%02X", msg.data[j]);
+                    hex += byte_hex;
+                }
+                obj["data"] = hex;
+                obj["timestamp"] = msg.timestamp;
+                obj["extended"] = msg.extended;
+            }
+        }
+
+        delete[] buffer;
+    }
+
+    doc["count"] = messages.size();
+    if (can_logger_ != nullptr) {
+        doc["total_logged"] = can_logger_->getMessageCount();
+        doc["dropped"] = can_logger_->getDroppedCount();
+    }
+
+    sendJSON(request, doc);
+}
+
+void WebServer::handleDownloadCANLog(AsyncWebServerRequest* request) {
+    if (can_logger_ == nullptr) {
+        sendError(request, 500, "CAN logger not available");
+        return;
+    }
+
+    // Build CSV from recent messages
+    String csv = "timestamp,id,dlc,data,extended,rtr\n";
+
+    // Get up to 1000 recent messages
+    const size_t max_msgs = 1000;
+    CANMessage* buffer = new CANMessage[max_msgs];
+    size_t count = 0;
+
+    if (can_logger_->getRecentMessages(buffer, count, max_msgs)) {
+        for (size_t i = 0; i < count; i++) {
+            const CANMessage& msg = buffer[i];
+            char line[128];
+
+            // Format data as hex string
+            char data_hex[24] = "";
+            for (int j = 0; j < msg.dlc; j++) {
+                char byte_hex[3];
+                snprintf(byte_hex, sizeof(byte_hex), "%02X", msg.data[j]);
+                strcat(data_hex, byte_hex);
+            }
+
+            snprintf(line, sizeof(line), "%u,0x%03X,%d,%s,%d,%d\n",
+                     (unsigned int)msg.timestamp, msg.id, msg.dlc, data_hex,
+                     msg.extended ? 1 : 0, msg.rtr ? 1 : 0);
+            csv += line;
+        }
+    }
+
+    delete[] buffer;
+
+    AsyncWebServerResponse* response = request->beginResponse(200, "text/csv", csv);
+    response->addHeader("Content-Disposition", "attachment; filename=\"canlog.csv\"");
+    request->send(response);
+}
+
+void WebServer::handleClearCANLog(AsyncWebServerRequest* request) {
+    if (can_logger_ != nullptr) {
+        can_logger_->clear();
+    }
+
+    JsonDocument doc;
+    doc["success"] = true;
+    doc["message"] = "CAN log cleared";
+    sendJSON(request, doc);
+}
+
+void WebServer::handleGetConfig(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    buildConfigJSON(doc.to<JsonObject>());
+    sendJSON(request, doc);
+}
+
+void WebServer::handlePostConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    if (settings_ == nullptr) {
+        sendError(request, 500, "Settings not available");
+        return;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, data, len);
+
+    if (error) {
+        sendError(request, 400, "Invalid JSON");
+        return;
+    }
+
+    Settings& settings = settings_->getSettings();
+
+    // Update settings from JSON (using ArduinoJson v7 API)
+    if (!doc["wifi_ssid"].isNull()) {
+        strlcpy(settings.wifi_ssid, doc["wifi_ssid"] | "", sizeof(settings.wifi_ssid));
+    }
+    if (!doc["wifi_password"].isNull()) {
+        strlcpy(settings.wifi_password, doc["wifi_password"] | "", sizeof(settings.wifi_password));
+    }
+    if (!doc["mqtt_broker"].isNull()) {
+        strlcpy(settings.mqtt_broker, doc["mqtt_broker"] | "", sizeof(settings.mqtt_broker));
+    }
+    if (!doc["mqtt_port"].isNull()) {
+        settings.mqtt_port = doc["mqtt_port"] | MQTT_DEFAULT_PORT;
+    }
+    if (!doc["mqtt_topic_prefix"].isNull()) {
+        strlcpy(settings.mqtt_topic_prefix, doc["mqtt_topic_prefix"] | MQTT_TOPIC_PREFIX, sizeof(settings.mqtt_topic_prefix));
+    }
+    if (!doc["mqtt_username"].isNull()) {
+        strlcpy(settings.mqtt_username, doc["mqtt_username"] | "", sizeof(settings.mqtt_username));
+    }
+    if (!doc["mqtt_password"].isNull()) {
+        strlcpy(settings.mqtt_password, doc["mqtt_password"] | "", sizeof(settings.mqtt_password));
+    }
+    if (!doc["publish_interval_ms"].isNull()) {
+        settings.publish_interval_ms = doc["publish_interval_ms"] | DEFAULT_PUBLISH_INTERVAL_MS;
+    }
+    if (!doc["sample_interval_ms"].isNull()) {
+        settings.sample_interval_ms = doc["sample_interval_ms"] | DEFAULT_SAMPLE_INTERVAL_MS;
+    }
+    if (!doc["web_refresh_ms"].isNull()) {
+        settings.web_refresh_ms = doc["web_refresh_ms"] | DEFAULT_WEB_REFRESH_MS;
+    }
+    if (!doc["num_batteries"].isNull()) {
+        settings.num_batteries = constrain(doc["num_batteries"] | 1, 1, MAX_BATTERY_MODULES);
+    }
+
+    // Save to NVS
+    if (settings_->save()) {
+        JsonDocument resp;
+        resp["success"] = true;
+        resp["message"] = "Configuration saved";
+        sendJSON(request, resp);
+    } else {
+        sendError(request, 500, "Failed to save configuration");
+    }
+}
+
+void WebServer::handlePostBatteryConfig(AsyncWebServerRequest* request, uint8_t id, uint8_t* data, size_t len) {
+    if (settings_ == nullptr || id >= MAX_BATTERY_MODULES) {
+        sendError(request, 404, "Battery not found");
+        return;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, data, len);
+
+    if (error) {
+        sendError(request, 400, "Invalid JSON");
+        return;
+    }
+
+    BatteryConfig config = settings_->getSettings().batteries[id];
+
+    if (!doc["enabled"].isNull()) {
+        config.enabled = doc["enabled"] | true;
+    }
+    if (!doc["name"].isNull()) {
+        strlcpy(config.name, doc["name"] | "", sizeof(config.name));
+    }
+    if (!doc["current_cal_offset"].isNull()) {
+        config.current_cal_offset = doc["current_cal_offset"] | ACS712_ZERO_CURRENT_MV;
+    }
+    if (!doc["current_cal_scale"].isNull()) {
+        config.current_cal_scale = doc["current_cal_scale"] | ACS712_20A_SENSITIVITY;
+    }
+    if (!doc["voltage_cal_scale"].isNull()) {
+        config.voltage_cal_scale = doc["voltage_cal_scale"] | VOLTAGE_DIVIDER_RATIO;
+    }
+    if (!doc["can_base_id"].isNull()) {
+        config.can_base_id = doc["can_base_id"] | 0;
+    }
+
+    if (settings_->updateBatteryConfig(id, config)) {
+        JsonDocument resp;
+        resp["success"] = true;
+        resp["message"] = "Battery configuration saved";
+        sendJSON(request, resp);
+    } else {
+        sendError(request, 500, "Failed to save battery configuration");
+    }
+}
+
+void WebServer::handleCalibrate(AsyncWebServerRequest* request, uint8_t id) {
+    if (id >= MAX_BATTERY_MODULES) {
+        sendError(request, 404, "Battery not found");
+        return;
+    }
+
+    // TODO: Trigger actual calibration of current sensor
+    // For now, just acknowledge the request
+
+    JsonDocument doc;
+    doc["success"] = true;
+    doc["battery_id"] = id;
+    doc["message"] = "Calibration started";
+    sendJSON(request, doc);
+}
+
+void WebServer::handleReset(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    doc["success"] = true;
+    doc["message"] = "Rebooting...";
+    sendJSON(request, doc);
+
+    // Schedule reboot after response is sent
+    delay(500);
+    ESP.restart();
+}
+
+void WebServer::handleNotFound(AsyncWebServerRequest* request) {
+    sendError(request, 404, "Not found");
+}
+
+// WebSocket handlers
+void WebServer::onWSEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
+                          AwsEventType type, void* arg, uint8_t* data, size_t len) {
+    switch (type) {
+        case WS_EVT_CONNECT:
+            Serial.printf("[WebSocket] Client #%u connected from %s\n",
+                         client->id(), client->remoteIP().toString().c_str());
+            if (client_callback_) {
+                client_callback_(client->id(), true);
+            }
+            // Send initial status to new client
+            {
+                JsonDocument doc;
+                buildStatusJSON(doc.to<JsonObject>());
+                String json;
+                serializeJson(doc, json);
+                client->text(json);
+            }
+            break;
+
+        case WS_EVT_DISCONNECT:
+            Serial.printf("[WebSocket] Client #%u disconnected\n", client->id());
+            if (client_callback_) {
+                client_callback_(client->id(), false);
+            }
+            break;
+
+        case WS_EVT_DATA:
+            // Handle incoming WebSocket data (commands from client)
+            {
+                AwsFrameInfo* info = (AwsFrameInfo*)arg;
+                if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+                    data[len] = 0;  // Null-terminate
+                    Serial.printf("[WebSocket] Received: %s\n", (char*)data);
+                    // Could handle client commands here
+                }
+            }
+            break;
+
+        case WS_EVT_PONG:
+        case WS_EVT_PING:
+        case WS_EVT_ERROR:
+            break;
+    }
+}
+
+// Broadcasting
+void WebServer::broadcastBatteryUpdate() {
+    if (ws_.count() == 0) return;
+
+    JsonDocument doc;
+    doc["type"] = "battery_update";
+    buildAllBatteriesJSON(doc["data"].to<JsonObject>());
+
+    String json;
+    serializeJson(doc, json);
+    ws_.textAll(json);
+    ws_messages_sent_++;
+}
+
+void WebServer::broadcastCANMessage(uint32_t id, uint8_t dlc, const uint8_t* data) {
+    if (ws_.count() == 0) return;
+
+    JsonDocument doc;
+    doc["type"] = "can_message";
+
+    char id_str[12];
+    snprintf(id_str, sizeof(id_str), "0x%03X", id);
+    doc["id"] = id_str;
+    doc["dlc"] = dlc;
+
+    String hex = "";
+    for (int i = 0; i < dlc; i++) {
+        char byte_hex[3];
+        snprintf(byte_hex, sizeof(byte_hex), "%02X", data[i]);
+        hex += byte_hex;
+    }
+    doc["data"] = hex;
+    doc["timestamp"] = millis();
+
+    String json;
+    serializeJson(doc, json);
+    ws_.textAll(json);
+    ws_messages_sent_++;
+}
+
+void WebServer::broadcastSystemStatus() {
+    if (ws_.count() == 0) return;
+
+    JsonDocument doc;
+    doc["type"] = "system_status";
+    buildSystemJSON(doc["data"].to<JsonObject>());
+
+    String json;
+    serializeJson(doc, json);
+    ws_.textAll(json);
+    ws_messages_sent_++;
+}
+
+void WebServer::broadcastText(const char* message) {
+    if (ws_.count() == 0) return;
+
+    ws_.textAll(message);
+    ws_messages_sent_++;
+}
+
+uint32_t WebServer::getWSClientCount() const {
+    return ws_.count();
+}
+
+// JSON builders
+void WebServer::buildStatusJSON(JsonObject obj) {
+    buildSystemJSON(obj["system"].to<JsonObject>());
+    buildAllBatteriesJSON(obj["batteries"].to<JsonObject>());
+}
+
+void WebServer::buildBatteryJSON(JsonObject obj, uint8_t id) {
+    if (batteries_ == nullptr || id >= MAX_BATTERY_MODULES) return;
+
+    const BatteryModule* battery = batteries_->getBattery(id);
+    if (battery == nullptr) return;
+
+    obj["id"] = id;
+    obj["name"] = battery->getName();
+    obj["enabled"] = battery->isEnabled();
+    obj["voltage"] = battery->getVoltage();
+    obj["current"] = battery->getCurrent();
+    obj["power"] = battery->getPower();
+    obj["soc"] = battery->getSOC();
+    obj["temp1"] = battery->getTemp1();
+    obj["temp2"] = battery->getTemp2();
+    obj["status_flags"] = battery->getStatusFlags();
+    obj["has_can_data"] = battery->hasCANData();
+    obj["has_error"] = battery->hasError();
+    obj["last_update"] = battery->getLastUpdate();
+    obj["data_fresh"] = battery->isDataFresh(5000);
+}
+
+void WebServer::buildAllBatteriesJSON(JsonObject obj) {
+    if (batteries_ == nullptr) return;
+
+    JsonArray arr = obj["batteries"].to<JsonArray>();
+    float total_power = 0;
+    float total_current = 0;
+
+    for (uint8_t i = 0; i < batteries_->getActiveBatteryCount(); i++) {
+        const BatteryModule* battery = batteries_->getBattery(i);
+        if (battery != nullptr && battery->isEnabled()) {
+            JsonObject battObj = arr.add<JsonObject>();
+            battObj["id"] = i;
+            battObj["name"] = battery->getName();
+            battObj["voltage"] = battery->getVoltage();
+            battObj["current"] = battery->getCurrent();
+            battObj["power"] = battery->getPower();
+            battObj["soc"] = battery->getSOC();
+            battObj["temp1"] = battery->getTemp1();
+            battObj["temp2"] = battery->getTemp2();
+            battObj["has_error"] = battery->hasError();
+
+            total_power += battery->getPower();
+            total_current += battery->getCurrent();
+        }
+    }
+
+    obj["total_power"] = total_power;
+    obj["total_current"] = total_current;
+    obj["average_voltage"] = batteries_->getAverageVoltage();
+    obj["timestamp"] = millis();
+}
+
+void WebServer::buildConfigJSON(JsonObject obj) {
+    if (settings_ == nullptr) return;
+
+    const Settings& settings = settings_->getSettings();
+
+    // Network (hide password for security)
+    obj["wifi_ssid"] = settings.wifi_ssid;
+    obj["wifi_configured"] = strlen(settings.wifi_password) > 0;
+    obj["mqtt_broker"] = settings.mqtt_broker;
+    obj["mqtt_port"] = settings.mqtt_port;
+    obj["mqtt_topic_prefix"] = settings.mqtt_topic_prefix;
+    obj["mqtt_username"] = settings.mqtt_username;
+
+    // Timing
+    obj["publish_interval_ms"] = settings.publish_interval_ms;
+    obj["sample_interval_ms"] = settings.sample_interval_ms;
+    obj["web_refresh_ms"] = settings.web_refresh_ms;
+
+    // CAN
+    obj["can_bitrate"] = settings.can_bitrate;
+
+    // Batteries
+    obj["num_batteries"] = settings.num_batteries;
+
+    JsonArray batteries = obj["batteries"].to<JsonArray>();
+    for (uint8_t i = 0; i < MAX_BATTERY_MODULES; i++) {
+        JsonObject batt = batteries.add<JsonObject>();
+        batt["id"] = i;
+        batt["enabled"] = settings.batteries[i].enabled;
+        batt["name"] = settings.batteries[i].name;
+        batt["current_cal_offset"] = settings.batteries[i].current_cal_offset;
+        batt["current_cal_scale"] = settings.batteries[i].current_cal_scale;
+        batt["voltage_cal_scale"] = settings.batteries[i].voltage_cal_scale;
+        batt["can_base_id"] = settings.batteries[i].can_base_id;
+    }
+}
+
+void WebServer::buildSystemJSON(JsonObject obj) {
+    obj["uptime_ms"] = millis();
+    obj["free_heap"] = ESP.getFreeHeap();
+    obj["min_free_heap"] = ESP.getMinFreeHeap();
+    obj["chip_model"] = ESP.getChipModel();
+    obj["chip_revision"] = ESP.getChipRevision();
+    obj["cpu_freq_mhz"] = ESP.getCpuFreqMHz();
+    obj["flash_size"] = ESP.getFlashChipSize();
+    obj["sdk_version"] = ESP.getSdkVersion();
+
+    // WiFi info
+    obj["wifi_connected"] = WiFi.status() == WL_CONNECTED;
+    if (WiFi.status() == WL_CONNECTED) {
+        obj["wifi_ssid"] = WiFi.SSID();
+        obj["wifi_rssi"] = WiFi.RSSI();
+        obj["wifi_ip"] = WiFi.localIP().toString();
+    }
+
+    // Web server stats
+    obj["http_requests"] = request_count_;
+    obj["ws_clients"] = ws_.count();
+    obj["ws_messages_sent"] = ws_messages_sent_;
+}
+
+// Utility functions
+void WebServer::sendJSON(AsyncWebServerRequest* request, JsonDocument& doc, int code) {
+    String json;
+    serializeJson(doc, json);
+
+    AsyncWebServerResponse* response = request->beginResponse(code, "application/json", json);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    request->send(response);
+}
+
+void WebServer::sendError(AsyncWebServerRequest* request, int code, const char* message) {
+    JsonDocument doc;
+    doc["error"] = true;
+    doc["code"] = code;
+    doc["message"] = message;
+    sendJSON(request, doc, code);
+}
