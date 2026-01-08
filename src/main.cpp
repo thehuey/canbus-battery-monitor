@@ -40,6 +40,8 @@ void setup() {
     LOG_INFO("=================================");
     LOG_INFO("eBike Battery CANBUS Monitor");
     LOG_INFO("=================================");
+    LOG_INFO("CPU Frequency: %d MHz (optimized for low power)\n", getCpuFrequencyMhz());
+    LOG_INFO("Free Heap: %d bytes\n\n", ESP.getFreeHeap());
 
     // Configure GPIO pins
     setupPins();
@@ -412,10 +414,8 @@ void sensorTask(void* parameter) {
         // - Voltage sensors
         // - Update battery modules
 
-        // Blink status LED
-        static bool ledState = false;
-        digitalWrite(PIN_STATUS_LED, ledState);
-        ledState = !ledState;
+        // LED status is controlled by WiFi state callback (see setupNetwork)
+        // No unnecessary blinking to save power
 
         vTaskDelay(sampleInterval);
     }
