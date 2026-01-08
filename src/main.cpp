@@ -260,7 +260,7 @@ void setupSensors() {
 }
 
 void setupNetwork() {
-    Serial.println("Initializing network...");
+    Serial.println("\n=== Initializing Network ===");
 
     const Settings& settings = settingsManager.getSettings();
 
@@ -273,14 +273,14 @@ void setupNetwork() {
         switch (state) {
             case WiFiState::CONNECTED:
                 digitalWrite(PIN_STATUS_LED, HIGH);
-                Serial.printf("WiFi connected: %s\n", wifiManager.getLocalIP().toString().c_str());
+                Serial.printf("[WiFi] Connected: %s\n", wifiManager.getLocalIP().toString().c_str());
                 break;
             case WiFiState::DISCONNECTED:
             case WiFiState::CONNECTING:
                 digitalWrite(PIN_STATUS_LED, LOW);
                 break;
             case WiFiState::AP_MODE:
-                Serial.printf("AP Mode: %s\n", wifiManager.getAPIP().toString().c_str());
+                Serial.printf("[WiFi] AP Mode Active: %s\n", wifiManager.getAPIP().toString().c_str());
                 break;
             default:
                 break;
@@ -293,10 +293,14 @@ void setupNetwork() {
 
     // Determine connection mode
     if (strlen(settings.wifi_ssid) > 0) {
-        // Try STA mode with configured credentials
-        Serial.printf("Attempting to connect to WiFi: %s\n", settings.wifi_ssid);
+        // Strategy: Try to connect to configured WiFi (STA mode)
+        // Keep AP mode running simultaneously for fallback configuration access
+        Serial.printf("[WiFi] Attempting to connect to: %s\n", settings.wifi_ssid);
+        Serial.printf("[WiFi] Starting fallback AP: %s\n", ap_ssid.c_str());
 
-        // Start AP+STA mode for fallback configuration
+        // Start AP+STA mode - this allows:
+        // 1. Connection to home WiFi if credentials are correct
+        // 2. Configuration portal via AP if connection fails
         wifiManager.startAPSTA(
             settings.wifi_ssid,
             settings.wifi_password,
@@ -305,6 +309,7 @@ void setupNetwork() {
         );
 
         // Wait for STA connection or timeout
+        Serial.print("[WiFi] Waiting for connection");
         uint32_t start = millis();
         while (!wifiManager.isConnected() && (millis() - start) < WIFI_CONNECTION_TIMEOUT) {
             delay(100);
@@ -313,18 +318,41 @@ void setupNetwork() {
         Serial.println();
 
         if (wifiManager.isConnected()) {
-            Serial.printf("Connected to %s, IP: %s\n", settings.wifi_ssid, wifiManager.getLocalIP().toString().c_str());
+            Serial.println("\n=== WiFi Connected Successfully ===");
+            Serial.printf("SSID: %s\n", settings.wifi_ssid);
+            Serial.printf("IP Address: %s\n", wifiManager.getLocalIP().toString().c_str());
+            Serial.printf("Signal Strength: %d dBm\n", wifiManager.getRSSI());
+            Serial.printf("\nWeb Interface: http://%s\n", wifiManager.getLocalIP().toString().c_str());
+            Serial.printf("Fallback AP: %s (Password: %s)\n", ap_ssid.c_str(), WIFI_AP_PASSWORD);
+            Serial.printf("AP Interface: http://%s\n", wifiManager.getAPIP().toString().c_str());
+            Serial.println("===================================\n");
         } else {
-            Serial.println("STA connection failed, AP mode available for configuration");
+            Serial.println("\n=== WiFi Connection Failed ===");
+            Serial.println("Reason: Connection timeout or incorrect credentials");
+            Serial.println("Fallback: AP mode is active for configuration\n");
+            Serial.printf("1. Connect your phone/computer to WiFi: %s\n", ap_ssid.c_str());
+            Serial.printf("2. Password: %s\n", WIFI_AP_PASSWORD);
+            Serial.printf("3. Open browser to: http://%s\n", wifiManager.getAPIP().toString().c_str());
+            Serial.println("4. Go to Settings (gear icon) to configure WiFi");
+            Serial.println("===============================\n");
         }
     } else {
-        // No credentials configured, start AP only
-        Serial.println("No WiFi configured, starting AP mode...");
+        // No credentials configured - first boot scenario
+        Serial.println("\n=== First Boot - No WiFi Configured ===");
+        Serial.println("Starting Access Point for initial setup...\n");
+
         wifiManager.startAP(ap_ssid.c_str(), WIFI_AP_PASSWORD);
-        Serial.printf("Connect to '%s' with password '%s' to configure\n", ap_ssid.c_str(), WIFI_AP_PASSWORD);
+
+        Serial.println("=== Setup Instructions ===");
+        Serial.printf("1. Connect your phone/computer to WiFi: %s\n", ap_ssid.c_str());
+        Serial.printf("2. Password: %s\n", WIFI_AP_PASSWORD);
+        Serial.printf("3. Open browser to: http://%s\n", wifiManager.getAPIP().toString().c_str());
+        Serial.println("4. Go to Settings (gear icon) to configure WiFi");
+        Serial.println("5. After saving WiFi settings, device will reboot and connect");
+        Serial.println("===========================\n");
     }
 
-    Serial.println("Network initialized");
+    Serial.println("[Network] Initialization complete");
 }
 
 void setupWebServer() {
