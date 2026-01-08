@@ -3,6 +3,7 @@
 #include "../config/settings.h"
 #include "../battery/battery_manager.h"
 #include "../can/can_logger.h"
+#include "../utils/remote_log.h"
 #include <SPIFFS.h>
 
 // Global instance
@@ -82,9 +83,130 @@ void WebServer::setupStaticFiles() {
                          "<li><a href='/api/batteries'>/api/batteries</a></li>"
                          "<li><a href='/api/canlog'>/api/canlog</a></li>"
                          "<li><a href='/api/config'>/api/config</a></li>"
+                         "<li><a href='/logs'>/logs</a> - Live log viewer</li>"
                          "</ul></body></html>";
             request->send(200, "text/html", html);
         }
+    });
+
+    // Serve embedded log viewer page
+    server_.on("/logs", HTTP_GET, [](AsyncWebServerRequest* request) {
+        String html = R"rawliteral(<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eBike Monitor - Logs</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: monospace; margin: 0; padding: 10px; background: #1a1a1a; color: #eee; }
+        h1 { margin: 0 0 10px 0; font-size: 1.2em; }
+        .controls { margin-bottom: 10px; }
+        .controls button { margin-right: 5px; padding: 5px 10px; cursor: pointer; }
+        .controls select { padding: 5px; }
+        #status { padding: 5px 10px; border-radius: 3px; display: inline-block; margin-left: 10px; }
+        #status.connected { background: #2a5; }
+        #status.disconnected { background: #a33; }
+        #log {
+            background: #111;
+            padding: 10px;
+            height: calc(100vh - 100px);
+            overflow-y: auto;
+            border: 1px solid #333;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .entry { margin: 2px 0; }
+        .ts { color: #888; }
+        .DEBUG { color: #888; }
+        .INFO { color: #6cf; }
+        .WARN { color: #fc6; }
+        .ERROR { color: #f66; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>eBike Monitor - Live Logs</h1>
+    <div class="controls">
+        <button onclick="clearLog()">Clear</button>
+        <button onclick="toggleScroll()">Auto-scroll: <span id="scrollState">ON</span></button>
+        <select id="levelFilter" onchange="applyFilter()">
+            <option value="DEBUG">Show All</option>
+            <option value="INFO" selected>INFO+</option>
+            <option value="WARN">WARN+</option>
+            <option value="ERROR">ERROR only</option>
+        </select>
+        <span id="status" class="disconnected">Disconnected</span>
+    </div>
+    <div id="log"></div>
+    <script>
+        const logEl = document.getElementById('log');
+        const statusEl = document.getElementById('status');
+        const levels = ['DEBUG', 'INFO', 'WARN', 'ERROR'];
+        let autoScroll = true;
+        let minLevel = 'INFO';
+        let ws;
+
+        function connect() {
+            ws = new WebSocket('ws://' + location.host + '/ws');
+            ws.onopen = () => {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'connected';
+            };
+            ws.onclose = () => {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'disconnected';
+                setTimeout(connect, 2000);
+            };
+            ws.onmessage = (e) => {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'log') {
+                    addEntry(msg);
+                } else if (msg.type === 'log_history') {
+                    msg.logs.forEach(addEntry);
+                }
+            };
+        }
+
+        function addEntry(log) {
+            if (levels.indexOf(log.level) < levels.indexOf(minLevel)) return;
+            const div = document.createElement('div');
+            div.className = 'entry';
+            const ts = new Date(log.ts).toLocaleTimeString() || formatMs(log.ts);
+            div.innerHTML = '<span class="ts">' + ts + '</span> <span class="' + log.level + '">[' + log.level + ']</span> ' + escapeHtml(log.msg);
+            logEl.appendChild(div);
+            if (autoScroll) logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function formatMs(ms) {
+            const s = Math.floor(ms / 1000);
+            const m = Math.floor(s / 60);
+            const h = Math.floor(m / 60);
+            return String(h).padStart(2,'0') + ':' + String(m%60).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function clearLog() { logEl.innerHTML = ''; }
+
+        function toggleScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('scrollState').textContent = autoScroll ? 'ON' : 'OFF';
+        }
+
+        function applyFilter() {
+            minLevel = document.getElementById('levelFilter').value;
+            clearLog();
+        }
+
+        connect();
+    </script>
+</body>
+</html>)rawliteral";
+        request->send(200, "text/html", html);
     });
 
     // Serve static files from SPIFFS /web directory
@@ -174,6 +296,12 @@ void WebServer::setupAPIEndpoints() {
     server_.on("/api/reset", HTTP_POST, [this](AsyncWebServerRequest* request) {
         request_count_++;
         handleReset(request);
+    });
+
+    // GET /api/logs - Recent log messages
+    server_.on("/api/logs", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleGetLogs(request);
     });
 
     // Handle 404
@@ -473,6 +601,35 @@ void WebServer::handleReset(AsyncWebServerRequest* request) {
     ESP.restart();
 }
 
+void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
+    // Limit parameter
+    size_t limit = LOG_BUFFER_SIZE;
+    if (request->hasParam("limit")) {
+        int l = request->getParam("limit")->value().toInt();
+        if (l > 0 && l <= LOG_BUFFER_SIZE) limit = l;
+    }
+
+    // Get recent logs
+    LogEntry* logs = new LogEntry[limit];
+    size_t count = remoteLog.getRecentLogs(logs, limit);
+
+    JsonDocument doc;
+    JsonArray arr = doc["logs"].to<JsonArray>();
+
+    for (size_t i = 0; i < count; i++) {
+        JsonObject entry = arr.add<JsonObject>();
+        entry["ts"] = logs[i].timestamp;
+        entry["level"] = RemoteLogger::levelToString(logs[i].level);
+        entry["msg"] = logs[i].message;
+    }
+
+    doc["count"] = count;
+    doc["buffer_size"] = LOG_BUFFER_SIZE;
+
+    delete[] logs;
+    sendJSON(request, doc);
+}
+
 void WebServer::handleNotFound(AsyncWebServerRequest* request) {
     sendError(request, 404, "Not found");
 }
@@ -495,6 +652,8 @@ void WebServer::onWSEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                 serializeJson(doc, json);
                 client->text(json);
             }
+            // Send log history to new client
+            sendLogHistory(client);
             break;
 
         case WS_EVT_DISCONNECT:
@@ -581,6 +740,49 @@ void WebServer::broadcastText(const char* message) {
 
     ws_.textAll(message);
     ws_messages_sent_++;
+}
+
+void WebServer::broadcastLog(const LogEntry& entry) {
+    if (ws_.count() == 0) return;
+
+    JsonDocument doc;
+    doc["type"] = "log";
+    doc["ts"] = entry.timestamp;
+    doc["level"] = RemoteLogger::levelToString(entry.level);
+    doc["msg"] = entry.message;
+
+    String json;
+    serializeJson(doc, json);
+    ws_.textAll(json);
+    ws_messages_sent_++;
+}
+
+void WebServer::sendLogHistory(AsyncWebSocketClient* client) {
+    if (client == nullptr) return;
+
+    // Get recent logs from buffer
+    LogEntry* logs = new LogEntry[LOG_BUFFER_SIZE];
+    size_t count = remoteLog.getRecentLogs(logs, LOG_BUFFER_SIZE);
+
+    if (count > 0) {
+        // Send as a batch message
+        JsonDocument doc;
+        doc["type"] = "log_history";
+        JsonArray arr = doc["logs"].to<JsonArray>();
+
+        for (size_t i = 0; i < count; i++) {
+            JsonObject entry = arr.add<JsonObject>();
+            entry["ts"] = logs[i].timestamp;
+            entry["level"] = RemoteLogger::levelToString(logs[i].level);
+            entry["msg"] = logs[i].message;
+        }
+
+        String json;
+        serializeJson(doc, json);
+        client->text(json);
+    }
+
+    delete[] logs;
 }
 
 uint32_t WebServer::getWSClientCount() const {

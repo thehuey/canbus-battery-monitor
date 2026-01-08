@@ -38,7 +38,7 @@
 // WiFi Configuration
 #define WIFI_AP_SSID_PREFIX     "eBikeMonitor-"
 #define WIFI_AP_PASSWORD        "ebike123"  // Must be 8+ chars for WPA2
-#define WIFI_AP_IP              "192.168.4.1"
+#define WIFI_AP_IP              "192.168.8.1"
 #define WIFI_CONNECTION_TIMEOUT 20000
 
 // MQTT Configuration

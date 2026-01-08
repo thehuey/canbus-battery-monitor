@@ -7,6 +7,7 @@
 #include "can/can_logger.h"
 #include "network/wifi_manager.h"
 #include "network/web_server.h"
+#include "utils/remote_log.h"
 
 // Global objects
 SettingsManager settingsManager;
@@ -32,17 +33,21 @@ void networkTask(void* parameter);
 void setup() {
     // Initialize serial for debugging
     setupSerial();
-    Serial.println("\n\n=================================");
-    Serial.println("eBike Battery CANBUS Monitor");
-    Serial.println("=================================\n");
+
+    // Initialize remote logger early
+    remoteLog.begin();
+
+    LOG_INFO("=================================");
+    LOG_INFO("eBike Battery CANBUS Monitor");
+    LOG_INFO("=================================");
 
     // Configure GPIO pins
     setupPins();
 
     // Load settings from NVS
-    Serial.println("Loading settings...");
+    LOG_INFO("Loading settings...");
     if (!settingsManager.begin()) {
-        Serial.println("Warning: Using default settings");
+        LOG_WARN("Using default settings");
     }
 
     // Print current settings
@@ -50,7 +55,7 @@ void setup() {
 
     // Initialize battery manager
     const Settings& settings = settingsManager.getSettings();
-    Serial.printf("Initializing %d battery module(s)...\n", settings.num_batteries);
+    LOG_INFO("Initializing %d battery module(s)...", settings.num_batteries);
     batteryManager.begin(settings.num_batteries);
 
     // Configure battery modules from settings
@@ -69,7 +74,7 @@ void setup() {
     setupWebServer();
 
     // Create FreeRTOS tasks
-    Serial.println("\nStarting tasks...");
+    LOG_INFO("Starting tasks...");
 
     xTaskCreatePinnedToCore(
         canTask,            // Task function
@@ -101,9 +106,8 @@ void setup() {
         1                   // Run on core 1 (WiFi core)
     );
 
-    Serial.println("System initialized successfully!");
-    Serial.println("=================================");
-    Serial.println("Type 'help' for available commands\n");
+    LOG_INFO("System initialized successfully!");
+    LOG_INFO("Type 'help' for available commands");
 }
 
 void loop() {
@@ -149,18 +153,17 @@ void loop() {
     if (millis() - lastHealthCheck > 30000) {  // Every 30 seconds
         if (!batteryManager.allBatteriesHealthy()) {
             uint8_t errorCount = batteryManager.getErrorCount();
-            Serial.printf("Warning: %d battery error(s) detected\n", errorCount);
+            LOG_WARN("%d battery error(s) detected", errorCount);
 
             // Print detailed status
             for (uint8_t i = 0; i < batteryManager.getActiveBatteryCount(); i++) {
                 const BatteryModule* battery = batteryManager.getBattery(i);
                 if (battery != nullptr && battery->isEnabled()) {
                     if (battery->hasError() || !battery->isDataFresh(10000)) {
-                        Serial.printf("  Battery %d (%s): ", i, battery->getName());
                         if (!battery->isDataFresh(10000)) {
-                            Serial.println("STALE DATA");
+                            LOG_WARN("Battery %d (%s): STALE DATA", i, battery->getName());
                         } else if (battery->hasError()) {
-                            Serial.println("ERROR FLAG SET");
+                            LOG_ERROR("Battery %d (%s): ERROR FLAG SET", i, battery->getName());
                         }
                     }
                 }
@@ -174,7 +177,7 @@ void loop() {
     if (millis() - lastHeapCheck > 10000) {  // Every 10 seconds
         uint32_t freeHeap = ESP.getFreeHeap();
         if (freeHeap < HEAP_WARNING_THRESHOLD) {
-            Serial.printf("Warning: Low heap memory: %d bytes\n", freeHeap);
+            LOG_WARN("Low heap memory: %u bytes", freeHeap);
         }
         lastHeapCheck = millis();
     }
@@ -220,21 +223,21 @@ void setupPins() {
     digitalWrite(PIN_STATUS_LED, LOW);
 
     // ADC pins are input by default, no need to configure
-    Serial.println("GPIO pins configured");
+    LOG_INFO("GPIO pins configured");
 }
 
 void setupCANBus() {
-    Serial.println("Initializing CAN bus...");
+    LOG_INFO("Initializing CAN bus...");
 
     // Initialize CAN logger
     if (!canLogger.begin("/canlog.csv")) {
-        Serial.println("Warning: CAN logger initialization failed");
+        LOG_WARN("CAN logger initialization failed");
     }
 
     // Initialize CAN driver
     uint32_t bitrate = settingsManager.getSettings().can_bitrate;
     if (!canDriver.begin(bitrate)) {
-        Serial.println("Error: CAN driver initialization failed!");
+        LOG_ERROR("CAN driver initialization failed!");
         return;
     }
 
@@ -250,17 +253,17 @@ void setupCANBus() {
         }
     });
 
-    Serial.println("CAN bus initialized successfully");
+    LOG_INFO("CAN bus initialized at %u kbps", bitrate / 1000);
 }
 
 void setupSensors() {
-    Serial.println("Initializing sensors...");
+    LOG_INFO("Initializing sensors...");
     // TODO: Initialize ADC and sensors
-    Serial.println("Sensors initialized (placeholder)");
+    LOG_INFO("Sensors initialized (placeholder)");
 }
 
 void setupNetwork() {
-    Serial.println("\n=== Initializing Network ===");
+    LOG_INFO("Initializing network...");
 
     const Settings& settings = settingsManager.getSettings();
 
@@ -273,14 +276,17 @@ void setupNetwork() {
         switch (state) {
             case WiFiState::CONNECTED:
                 digitalWrite(PIN_STATUS_LED, HIGH);
-                Serial.printf("[WiFi] Connected: %s\n", wifiManager.getLocalIP().toString().c_str());
+                LOG_INFO("WiFi connected: %s", wifiManager.getLocalIP().toString().c_str());
                 break;
             case WiFiState::DISCONNECTED:
+                LOG_WARN("WiFi disconnected");
+                digitalWrite(PIN_STATUS_LED, LOW);
+                break;
             case WiFiState::CONNECTING:
                 digitalWrite(PIN_STATUS_LED, LOW);
                 break;
             case WiFiState::AP_MODE:
-                Serial.printf("[WiFi] AP Mode Active: %s\n", wifiManager.getAPIP().toString().c_str());
+                LOG_INFO("AP Mode active: %s", wifiManager.getAPIP().toString().c_str());
                 break;
             default:
                 break;
@@ -293,10 +299,8 @@ void setupNetwork() {
 
     // Determine connection mode
     if (strlen(settings.wifi_ssid) > 0) {
-        // Strategy: Try to connect to configured WiFi (STA mode)
-        // Keep AP mode running simultaneously for fallback configuration access
-        Serial.printf("[WiFi] Attempting to connect to: %s\n", settings.wifi_ssid);
-        Serial.printf("[WiFi] Starting fallback AP: %s\n", ap_ssid.c_str());
+        // Try STA mode with configured credentials
+        LOG_INFO("Connecting to WiFi: %s", settings.wifi_ssid);
 
         // Start AP+STA mode - this allows:
         // 1. Connection to home WiFi if credentials are correct
@@ -318,61 +322,42 @@ void setupNetwork() {
         Serial.println();
 
         if (wifiManager.isConnected()) {
-            Serial.println("\n=== WiFi Connected Successfully ===");
-            Serial.printf("SSID: %s\n", settings.wifi_ssid);
-            Serial.printf("IP Address: %s\n", wifiManager.getLocalIP().toString().c_str());
-            Serial.printf("Signal Strength: %d dBm\n", wifiManager.getRSSI());
-            Serial.printf("\nWeb Interface: http://%s\n", wifiManager.getLocalIP().toString().c_str());
-            Serial.printf("Fallback AP: %s (Password: %s)\n", ap_ssid.c_str(), WIFI_AP_PASSWORD);
-            Serial.printf("AP Interface: http://%s\n", wifiManager.getAPIP().toString().c_str());
-            Serial.println("===================================\n");
+            LOG_INFO("Connected to %s, IP: %s", settings.wifi_ssid, wifiManager.getLocalIP().toString().c_str());
         } else {
-            Serial.println("\n=== WiFi Connection Failed ===");
-            Serial.println("Reason: Connection timeout or incorrect credentials");
-            Serial.println("Fallback: AP mode is active for configuration\n");
-            Serial.printf("1. Connect your phone/computer to WiFi: %s\n", ap_ssid.c_str());
-            Serial.printf("2. Password: %s\n", WIFI_AP_PASSWORD);
-            Serial.printf("3. Open browser to: http://%s\n", wifiManager.getAPIP().toString().c_str());
-            Serial.println("4. Go to Settings (gear icon) to configure WiFi");
-            Serial.println("===============================\n");
+            LOG_WARN("STA connection failed, AP mode available for configuration");
         }
     } else {
-        // No credentials configured - first boot scenario
-        Serial.println("\n=== First Boot - No WiFi Configured ===");
-        Serial.println("Starting Access Point for initial setup...\n");
-
+        // No credentials configured, start AP only
+        LOG_INFO("No WiFi configured, starting AP mode...");
         wifiManager.startAP(ap_ssid.c_str(), WIFI_AP_PASSWORD);
-
-        Serial.println("=== Setup Instructions ===");
-        Serial.printf("1. Connect your phone/computer to WiFi: %s\n", ap_ssid.c_str());
-        Serial.printf("2. Password: %s\n", WIFI_AP_PASSWORD);
-        Serial.printf("3. Open browser to: http://%s\n", wifiManager.getAPIP().toString().c_str());
-        Serial.println("4. Go to Settings (gear icon) to configure WiFi");
-        Serial.println("5. After saving WiFi settings, device will reboot and connect");
-        Serial.println("===========================\n");
+        LOG_INFO("Connect to '%s' to configure", ap_ssid.c_str());
     }
 
-    Serial.println("[Network] Initialization complete");
+    LOG_INFO("Network initialized");
 }
 
 void setupWebServer() {
-    Serial.println("Initializing web server...");
+    LOG_INFO("Initializing web server...");
 
     // Initialize web server with dependencies
     webServer.begin(&settingsManager, &batteryManager, &canLogger);
 
     // Set up WebSocket client callback
     webServer.setClientCallback([](uint32_t client_id, bool connected) {
-        Serial.printf("WebSocket client %u %s\n", client_id, connected ? "connected" : "disconnected");
+        LOG_INFO("WebSocket client %u %s", client_id, connected ? "connected" : "disconnected");
     });
 
-    Serial.printf("Web server started on port %d\n", WEB_SERVER_PORT);
-    Serial.println("Web server initialized");
+    // Wire up remote logger to broadcast via WebSocket
+    remoteLog.setBroadcastCallback([](const LogEntry& entry) {
+        webServer.broadcastLog(entry);
+    });
+
+    LOG_INFO("Web server started on port %d", WEB_SERVER_PORT);
 }
 
 // FreeRTOS Tasks
 void canTask(void* parameter) {
-    Serial.println("CAN task started");
+    LOG_INFO("CAN task started");
 
     CANMessage msg;
     CANBatteryData battData;
@@ -403,11 +388,11 @@ void canTask(void* parameter) {
         // Print CAN statistics every 30 seconds
         if (millis() - last_stats_print > 30000) {
             const CANStats& stats = canDriver.getStats();
-            Serial.printf("CAN Stats - RX: %u, TX: %u, Dropped: %u, Errors: %u\n",
-                         stats.rx_count, stats.tx_count, stats.rx_dropped, stats.error_count);
-            Serial.printf("CAN Logger - Messages: %u, Dropped: %u, Size: %d bytes\n",
-                         canLogger.getMessageCount(), canLogger.getDroppedCount(),
-                         canLogger.getLogSize());
+            LOG_DEBUG("CAN Stats - RX: %u, TX: %u, Dropped: %u, Errors: %u",
+                      stats.rx_count, stats.tx_count, stats.rx_dropped, stats.error_count);
+            LOG_DEBUG("CAN Logger - Messages: %u, Dropped: %u, Size: %d bytes",
+                      canLogger.getMessageCount(), canLogger.getDroppedCount(),
+                      canLogger.getLogSize());
             last_stats_print = millis();
         }
 
@@ -416,7 +401,7 @@ void canTask(void* parameter) {
 }
 
 void sensorTask(void* parameter) {
-    Serial.println("Sensor task started");
+    LOG_INFO("Sensor task started");
 
     const Settings& settings = settingsManager.getSettings();
     TickType_t sampleInterval = pdMS_TO_TICKS(settings.sample_interval_ms);
@@ -437,7 +422,7 @@ void sensorTask(void* parameter) {
 }
 
 void networkTask(void* parameter) {
-    Serial.println("Network task started");
+    LOG_INFO("Network task started");
 
     const Settings& settings = settingsManager.getSettings();
     TickType_t webRefreshInterval = pdMS_TO_TICKS(settings.web_refresh_ms);
