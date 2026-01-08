@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>eBike Monitor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>⚡ eBike Monitor</h1>
+            <button class="btn-icon" id="settingsBtn" aria-label="Settings">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M12 1v6m0 6v6m0-6h6m-6 0H6m12.364-8.364l-4.242 4.242M9.172 14.828l-4.242 4.242M20.364 20.364l-4.242-4.242M9.172 9.172L4.93 4.93"></path>
+                </svg>
+            </button>
+        </header>
+
+        <!-- Connection Status -->
+        <div class="status-bar" id="statusBar">
+            <div class="status-item">
+                <span class="status-label">WiFi:</span>
+                <span class="status-value" id="wifiStatus">Connecting...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">IP:</span>
+                <span class="status-value" id="ipAddress">-</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Uptime:</span>
+                <span class="status-value" id="uptime">-</span>
+            </div>
+        </div>
+
+        <!-- Battery Summary -->
+        <div class="summary-card">
+            <div class="summary-item">
+                <div class="summary-label">Total Power</div>
+                <div class="summary-value" id="totalPower">0.0 W</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Total Current</div>
+                <div class="summary-value" id="totalCurrent">0.0 A</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Avg Voltage</div>
+                <div class="summary-value" id="avgVoltage">0.0 V</div>
+            </div>
+        </div>
+
+        <!-- Battery Modules -->
+        <div id="batteriesContainer" class="batteries-container">
+            <!-- Battery cards will be dynamically inserted here -->
+        </div>
+
+        <!-- Settings Modal -->
+        <div class="modal" id="settingsModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <button class="btn-close" id="closeSettings">&times;</button>
+                </div>
+
+                <div class="modal-body">
+                    <!-- WiFi Configuration -->
+                    <div class="settings-section">
+                        <h3>WiFi Configuration</h3>
+                        <form id="wifiForm">
+                            <div class="form-group">
+                                <label for="wifiSSID">WiFi SSID</label>
+                                <input type="text" id="wifiSSID" name="wifi_ssid" placeholder="Network name" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label for="wifiPassword">WiFi Password</label>
+                                <input type="password" id="wifiPassword" name="wifi_password" placeholder="Password" autocomplete="new-password">
+                                <small class="form-help">Leave blank to keep current password</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save WiFi Settings</button>
+                        </form>
+                    </div>
+
+                    <!-- MQTT Configuration -->
+                    <div class="settings-section">
+                        <h3>MQTT Configuration</h3>
+                        <form id="mqttForm">
+                            <div class="form-group">
+                                <label for="mqttBroker">MQTT Broker</label>
+                                <input type="text" id="mqttBroker" name="mqtt_broker" placeholder="broker.example.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="mqttPort">Port</label>
+                                <input type="number" id="mqttPort" name="mqtt_port" placeholder="1883" min="1" max="65535">
+                            </div>
+                            <div class="form-group">
+                                <label for="mqttUsername">Username (optional)</label>
+                                <input type="text" id="mqttUsername" name="mqtt_username" placeholder="Username">
+                            </div>
+                            <div class="form-group">
+                                <label for="mqttPassword">Password (optional)</label>
+                                <input type="password" id="mqttPassword" name="mqtt_password" placeholder="Password">
+                            </div>
+                            <div class="form-group">
+                                <label for="mqttTopicPrefix">Topic Prefix</label>
+                                <input type="text" id="mqttTopicPrefix" name="mqtt_topic_prefix" placeholder="ebike">
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save MQTT Settings</button>
+                        </form>
+                    </div>
+
+                    <!-- System Actions -->
+                    <div class="settings-section">
+                        <h3>System Actions</h3>
+                        <button class="btn btn-warning" id="rebootBtn">Reboot Device</button>
+                        <button class="btn btn-danger" id="clearWiFiBtn">Clear WiFi & Reboot</button>
+                    </div>
+
+                    <!-- System Info -->
+                    <div class="settings-section">
+                        <h3>System Information</h3>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="info-label">Chip Model:</span>
+                                <span class="info-value" id="chipModel">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">CPU Freq:</span>
+                                <span class="info-value" id="cpuFreq">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Free Heap:</span>
+                                <span class="info-value" id="freeHeap">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">SDK Version:</span>
+                                <span class="info-value" id="sdkVersion">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification -->
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
