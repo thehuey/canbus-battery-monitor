@@ -5,6 +5,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <functional>
+#include "../utils/remote_log.h"
 
 // Forward declarations
 class SettingsManager;
@@ -38,6 +39,10 @@ public:
     void broadcastCANMessage(uint32_t id, uint8_t dlc, const uint8_t* data);
     void broadcastSystemStatus();
     void broadcastText(const char* message);
+    void broadcastLog(const LogEntry& entry);
+
+    // Send log history to a specific client (on connect)
+    void sendLogHistory(AsyncWebSocketClient* client);
 
     // Get connected WebSocket client count
     uint32_t getWSClientCount() const;
@@ -80,6 +85,7 @@ private:
     void handlePostBatteryConfig(AsyncWebServerRequest* request, uint8_t id, uint8_t* data, size_t len);
     void handleCalibrate(AsyncWebServerRequest* request, uint8_t id);
     void handleReset(AsyncWebServerRequest* request);
+    void handleGetLogs(AsyncWebServerRequest* request);
     void handleNotFound(AsyncWebServerRequest* request);
 
     // WebSocket handlers

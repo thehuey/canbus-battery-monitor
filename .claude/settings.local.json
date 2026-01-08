@@ -4,7 +4,8 @@
       "Bash(find:*)",
       "Bash(pio run:*)",
       "Bash(git config:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: eBike Battery CANBUS Monitor\n\nCore firmware implementation for ESP32-based battery monitoring:\n- CAN bus driver \\(TWAI\\) for 500kbps communication\n- Battery manager supporting 1-5 battery modules\n- ACS712 current sensor interface\n- Voltage sensing with divider support\n- NVS-backed settings persistence\n- CAN message parsing and logging\n- Ring buffer utilities for data handling\n\nHardware documentation:\n- Pin assignments and wiring guide\n- Voltage divider calculations\n- Safety guidelines\n\nBuild system:\n- PlatformIO configuration\n- Multiple test environments\n- Dev container support\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: eBike Battery CANBUS Monitor\n\nCore firmware implementation for ESP32-based battery monitoring:\n- CAN bus driver \\(TWAI\\) for 500kbps communication\n- Battery manager supporting 1-5 battery modules\n- ACS712 current sensor interface\n- Voltage sensing with divider support\n- NVS-backed settings persistence\n- CAN message parsing and logging\n- Ring buffer utilities for data handling\n\nHardware documentation:\n- Pin assignments and wiring guide\n- Voltage divider calculations\n- Safety guidelines\n\nBuild system:\n- PlatformIO configuration\n- Multiple test environments\n- Dev container support\nEOF\n\\)\")",
+      "Bash(/home/node/.platformio/penv/bin/pio run:*)"
     ]
   }
 }
