@@ -42,9 +42,13 @@
 #define WIFI_CONNECTION_TIMEOUT 20000
 
 // MQTT Configuration
-#define MQTT_DEFAULT_PORT       1883
+// HiveMQ Cloud broker with TLS
+#define MQTT_DEFAULT_BROKER     "508641aa1f684bb2b2f1170750e8c5ac.s1.eu.hivemq.cloud"
+#define MQTT_DEFAULT_PORT       8883  // TLS MQTT port
+#define MQTT_WEBSOCKET_PORT     8884  // TLS WebSocket port
 #define MQTT_RECONNECT_DELAY    5000
 #define MQTT_TOPIC_PREFIX       "ebike"
+// Note: TLS support requires WiFiClientSecure and proper certificate handling
 
 // Web Server
 #define WEB_SERVER_PORT         80
