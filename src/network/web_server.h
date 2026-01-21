@@ -11,6 +11,9 @@
 class SettingsManager;
 class BatteryManager;
 class CANLogger;
+namespace Protocol {
+    class Loader;
+}
 
 // WebSocket message types
 enum class WSMessageType {
@@ -29,7 +32,8 @@ public:
     ~WebServer();
 
     // Initialize the web server
-    bool begin(SettingsManager* settings, BatteryManager* batteries, CANLogger* canLog);
+    bool begin(SettingsManager* settings, BatteryManager* batteries, CANLogger* canLog,
+               Protocol::Loader* protocolLoader = nullptr);
 
     // Stop the server
     void stop();
@@ -62,6 +66,7 @@ private:
     SettingsManager* settings_;
     BatteryManager* batteries_;
     CANLogger* can_logger_;
+    Protocol::Loader* protocol_loader_;
 
     WSClientCallback client_callback_;
 
@@ -86,7 +91,18 @@ private:
     void handleCalibrate(AsyncWebServerRequest* request, uint8_t id);
     void handleReset(AsyncWebServerRequest* request);
     void handleGetLogs(AsyncWebServerRequest* request);
+    void handleGetCANDiagnostics(AsyncWebServerRequest* request);
     void handleNotFound(AsyncWebServerRequest* request);
+
+    // Protocol API handlers
+    void handleGetProtocols(AsyncWebServerRequest* request);
+    void handleGetBuiltinProtocols(AsyncWebServerRequest* request);
+    void handleGetCustomProtocols(AsyncWebServerRequest* request);
+    void handleGetProtocol(AsyncWebServerRequest* request, const String& id);
+    void handleUploadProtocol(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    void handleFetchProtocol(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    void handleDeleteProtocol(AsyncWebServerRequest* request, const String& id);
+    void handleValidateProtocol(AsyncWebServerRequest* request, const String& id);
 
     // WebSocket handlers
     void onWSEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,

@@ -1,0 +1,179 @@
+{
+  "name": "Tianjin D-power 48V 13S",
+  "manufacturer": "D-power",
+  "version": "1.0",
+  "description": "Protocol for Tianjin D-power 48V 13S 25Ah Li-ion battery pack",
+  "cell_count": 13,
+  "nominal_voltage": 48.0,
+  "capacity_ah": 25.0,
+  "chemistry": "Li-ion",
+  "messages": [
+    {
+      "can_id": 513,
+      "can_id_hex": "0x201",
+      "name": "Pack Configuration",
+      "description": "Static pack configuration data",
+      "period_ms": 1000,
+      "fields": [
+        {
+          "name": "unknown_word_1",
+          "description": "Unknown 16-bit value",
+          "byte_offset": 0,
+          "length": 2,
+          "data_type": "uint16_le",
+          "unit": null,
+          "scale": 1.0,
+          "offset": 0.0,
+          "min_value": null,
+          "max_value": null
+        },
+        {
+          "name": "pack_voltage_raw",
+          "description": "Pack voltage raw value (purpose unclear)",
+          "byte_offset": 2,
+          "length": 2,
+          "data_type": "uint16_le",
+          "unit": null,
+          "scale": 0.1,
+          "offset": 0.0,
+          "min_value": null,
+          "max_value": null
+        }
+      ]
+    },
+    {
+      "can_id": 514,
+      "can_id_hex": "0x202",
+      "name": "Total Pack Voltage",
+      "description": "Sum of all cell voltages in millivolts",
+      "period_ms": 100,
+      "fields": [
+        {
+          "name": "total_voltage_mv",
+          "description": "Total pack voltage (sum of all cells)",
+          "byte_offset": 0,
+          "length": 2,
+          "data_type": "uint16_le",
+          "unit": "mV",
+          "scale": 1.0,
+          "offset": 0.0,
+          "min_value": 39000,
+          "max_value": 54600
+        },
+        {
+          "name": "avg_cell_voltage_mv",
+          "description": "Average cell voltage calculated from total",
+          "byte_offset": 0,
+          "length": 2,
+          "data_type": "uint16_le",
+          "unit": "mV",
+          "scale": 0.07692307692,
+          "offset": 0.0,
+          "formula": "value / 13",
+          "min_value": 3000,
+          "max_value": 4200
+        }
+      ]
+    },
+    {
+      "can_id": 515,
+      "can_id_hex": "0x203",
+      "name": "Cell Data",
+      "description": "Individual cell voltages with rotating index",
+      "period_ms": 50,
+      "fields": [
+        {
+          "name": "cell_index",
+          "description": "Cell index counter (increments sequentially)",
+          "byte_offset": 0,
+          "length": 1,
+          "data_type": "uint8",
+          "unit": null,
+          "scale": 1.0,
+          "offset": 0.0,
+          "min_value": 0,
+          "max_value": 255
+        },
+        {
+          "name": "unknown_byte_1",
+          "description": "Unknown byte",
+          "byte_offset": 1,
+          "length": 1,
+          "data_type": "uint8",
+          "unit": null,
+          "scale": 1.0,
+          "offset": 0.0,
+          "min_value": null,
+          "max_value": null
+        },
+        {
+          "name": "cell_voltage_1",
+          "description": "First cell voltage in this message",
+          "byte_offset": 2,
+          "length": 2,
+          "data_type": "uint16_le",
+          "unit": "mV",
+          "scale": 1.0,
+          "offset": 0.0,
+          "min_value": 3000,
+          "max_value": 4200,
+          "note": "May be individual cell voltage - needs validation"
+        },
+        {
+          "name": "cell_voltage_2",
+          "description": "Second cell voltage in this message",
+          "byte_offset": 4,
+          "length": 2,
+          "data_type": "uint16_le",
+          "unit": "mV",
+          "scale": 1.0,
+          "offset": 0.0,
+          "min_value": 3000,
+          "max_value": 4200,
+          "note": "May be individual cell voltage - needs validation"
+        },
+        {
+          "name": "cell_voltage_3",
+          "description": "Third cell voltage in this message",
+          "byte_offset": 6,
+          "length": 2,
+          "data_type": "uint16_le",
+          "unit": "mV",
+          "scale": 1.0,
+          "offset": 0.0,
+          "min_value": 3000,
+          "max_value": 4200,
+          "note": "May be individual cell voltage - needs validation"
+        }
+      ]
+    },
+    {
+      "can_id": 516,
+      "can_id_hex": "0x204",
+      "name": "State/Command",
+      "description": "Battery state machine or charge phase indicator",
+      "period_ms": 100,
+      "fields": [
+        {
+          "name": "state",
+          "description": "State value that counts down during charging",
+          "byte_offset": 0,
+          "length": 1,
+          "data_type": "uint8",
+          "unit": null,
+          "scale": 1.0,
+          "offset": 0.0,
+          "enum_values": {
+            "34": "charging_phase_1",
+            "33": "charging_phase_2",
+            "32": "charging_phase_3",
+            "16": "charge_complete",
+            "0": "idle"
+          },
+          "min_value": 0,
+          "max_value": 255
+        }
+      ]
+    }
+  ]
+}

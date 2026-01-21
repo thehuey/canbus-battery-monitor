@@ -46,6 +46,10 @@ public:
     const CANStats& getStats() const { return stats; }
     void resetStats();
 
+    // Diagnostic info
+    const char* getStatusString() const;
+    bool getDiagnostics(char* buffer, size_t size) const;
+
     // Recovery
     bool recoverBusOff();
 
@@ -56,6 +60,11 @@ public:
     // Callbacks for received messages
     typedef void (*MessageCallback)(const CANMessage& msg);
     void setMessageCallback(MessageCallback callback);
+
+    // Test/Ping functions
+    bool sendPing();  // Send a test message to verify transceiver is working
+    void enablePeriodicPing(uint32_t interval_ms);
+    void disablePeriodicPing();
 
 private:
     CANStatus status;
@@ -77,6 +86,12 @@ private:
 
     // Task handle
     TaskHandle_t rx_task_handle;
+
+    // Ping/heartbeat state
+    bool ping_enabled;
+    uint32_t ping_interval_ms;
+    uint32_t last_ping_time;
+    uint8_t ping_counter;
 };
 
 // Global CAN driver instance

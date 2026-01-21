@@ -28,6 +28,9 @@
 #define CAN_BITRATE         500000  // 500 kbps
 #define CAN_RX_QUEUE_SIZE   100
 #define CAN_TX_QUEUE_SIZE   20
+#define CAN_PING_ENABLED    false   // Disabled by default - enable after fixing bus termination
+#define CAN_PING_INTERVAL   1000    // Ping interval in milliseconds
+#define CAN_PING_ID         0x404   // Ping message ID
 
 // Timing Configuration (milliseconds)
 #define DEFAULT_SAMPLE_INTERVAL_MS      100

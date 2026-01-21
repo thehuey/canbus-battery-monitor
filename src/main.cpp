@@ -7,6 +7,7 @@
 #include "can/can_logger.h"
 #include "network/wifi_manager.h"
 #include "network/web_server.h"
+#include "network/mqtt_client.h"
 #include "utils/remote_log.h"
 
 // Global objects
@@ -255,6 +256,12 @@ void setupCANBus() {
         }
     });
 
+    // Enable periodic ping to test transceiver
+#if CAN_PING_ENABLED
+    canDriver.enablePeriodicPing(CAN_PING_INTERVAL);
+    LOG_INFO("CAN ping enabled (interval: %d ms, ID: 0x%03X)", CAN_PING_INTERVAL, CAN_PING_ID);
+#endif
+
     LOG_INFO("CAN bus initialized at %u kbps", bitrate / 1000);
 }
 
@@ -333,6 +340,12 @@ void setupNetwork() {
         LOG_INFO("No WiFi configured, starting AP mode...");
         wifiManager.startAP(ap_ssid.c_str(), WIFI_AP_PASSWORD);
         LOG_INFO("Connect to '%s' to configure", ap_ssid.c_str());
+    }
+
+    // Initialize MQTT client
+    LOG_INFO("Initializing MQTT client...");
+    if (!mqttClient.begin(&settingsManager, &batteryManager)) {
+        LOG_WARN("MQTT client initialization failed");
     }
 
     LOG_INFO("Network initialized");
@@ -430,6 +443,8 @@ void networkTask(void* parameter) {
     uint32_t last_battery_broadcast = 0;
     uint32_t last_system_broadcast = 0;
     uint32_t last_wifi_check = 0;
+    uint32_t last_mqtt_update = 0;
+    uint32_t last_mqtt_publish = 0;
 
     while (true) {
         uint32_t now = millis();
@@ -438,6 +453,12 @@ void networkTask(void* parameter) {
         if (now - last_wifi_check > 1000) {  // Check every second
             wifiManager.update();
             last_wifi_check = now;
+        }
+
+        // Update MQTT client (handles reconnection and keep-alive)
+        if (now - last_mqtt_update > 100) {  // Update MQTT every 100ms
+            mqttClient.update();
+            last_mqtt_update = now;
         }
 
         // Only broadcast if WiFi is connected
@@ -455,9 +476,25 @@ void networkTask(void* parameter) {
             }
         }
 
-        // TODO: Handle MQTT publishing (when implemented)
-        // - Publish battery status to MQTT broker
-        // - Publish system status
+        // MQTT publishing (if connected)
+        if (mqttClient.isConnected() && now - last_mqtt_publish > settings.publish_interval_ms) {
+            // Publish individual battery status
+            for (uint8_t i = 0; i < batteryManager.getActiveBatteryCount(); i++) {
+                mqttClient.publishBatteryStatus(i);
+            }
+
+            // Publish combined status
+            mqttClient.publishAllBatteries();
+
+            // Publish system status (every 5 publishes = every 5 seconds by default)
+            static uint8_t publish_count = 0;
+            if (++publish_count >= 5) {
+                mqttClient.publishSystemStatus();
+                publish_count = 0;
+            }
+
+            last_mqtt_publish = now;
+        }
 
         vTaskDelay(webRefreshInterval);
     }

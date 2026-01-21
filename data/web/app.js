@@ -230,6 +230,12 @@ class BatteryMonitor {
             document.getElementById('uptime').textContent = this.formatUptime(data.uptime_ms);
         }
 
+        // CAN message count in status bar
+        if (data.can_message_count !== undefined) {
+            document.getElementById('canMessageCount').textContent =
+                this.formatNumber(data.can_message_count);
+        }
+
         // System info in settings
         if (data.chip_model) {
             document.getElementById('chipModel').textContent = data.chip_model;
@@ -243,6 +249,14 @@ class BatteryMonitor {
         }
         if (data.sdk_version) {
             document.getElementById('sdkVersion').textContent = data.sdk_version;
+        }
+        if (data.can_message_count !== undefined) {
+            document.getElementById('canMsgTotal').textContent =
+                this.formatNumber(data.can_message_count);
+        }
+        if (data.can_dropped_count !== undefined) {
+            document.getElementById('canMsgDropped').textContent =
+                this.formatNumber(data.can_dropped_count);
         }
     }
 
@@ -443,6 +457,10 @@ class BatteryMonitor {
         } else {
             return `${seconds}s`;
         }
+    }
+
+    formatNumber(num) {
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     }
 
     escapeHtml(text) {

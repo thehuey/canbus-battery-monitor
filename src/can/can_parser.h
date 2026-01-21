@@ -2,30 +2,41 @@
 #define CAN_PARSER_H
 
 #include "can_message.h"
+#include "protocol.h"
 
 // CAN protocol parser class
 class CANParser {
 public:
     CANParser();
 
-    // Parse a CAN message and extract battery data
+    // Set the protocol to use for parsing
+    void setProtocol(const Protocol::Definition* protocol);
+
+    // Parse a CAN message and extract battery data using the configured protocol
     bool parseMessage(const CANMessage& msg, CANBatteryData& data);
 
-    // Register custom message handlers
+    // Extract a specific field value from a CAN message
+    // Returns NAN if field not found or extraction failed
+    float extractField(const CANMessage& msg, const char* field_name);
+
+    // Get the current protocol
+    const Protocol::Definition* getProtocol() const { return protocol; }
+
+    // Register custom message handlers (legacy support)
     typedef bool (*MessageHandler)(const CANMessage&, CANBatteryData&);
     void registerHandler(uint32_t can_id, MessageHandler handler);
 
 private:
-    // Built-in parsers for known message types
+    const Protocol::Definition* protocol;
+
+    // Parse message using protocol definition
+    bool parseWithProtocol(const CANMessage& msg, CANBatteryData& data);
+
+    // Legacy parsers for backwards compatibility (deprecated)
     bool parseBatteryStatus(const CANMessage& msg, CANBatteryData& data);
     bool parseCellVoltages(const CANMessage& msg, CANBatteryData& data);
 
-    // Helper functions for data extraction
-    uint16_t extractUint16LE(const uint8_t* data, uint8_t offset);
-    int16_t extractInt16LE(const uint8_t* data, uint8_t offset);
-    uint32_t extractUint32LE(const uint8_t* data, uint8_t offset);
-
-    // Custom handlers registry
+    // Custom handlers registry (legacy support)
     static constexpr size_t MAX_HANDLERS = 16;
     struct HandlerEntry {
         uint32_t can_id;

@@ -1,5 +1,6 @@
 #include "wifi_manager.h"
 #include "../config/config.h"
+#include "../utils/remote_log.h"
 
 // Global instance
 WiFiManager wifiManager;
@@ -19,7 +20,7 @@ WiFiManager::WiFiManager()
 }
 
 bool WiFiManager::begin() {
-    Serial.println("[WiFi] Initializing WiFi subsystem");
+    LOG_INFO("[WiFi] Initializing WiFi subsystem");
 
     // Reduce WiFi TX power to minimize current draw during initialization
     // This helps prevent brownout on weak power supplies
@@ -31,7 +32,7 @@ bool WiFiManager::begin() {
     delay(200);  // Longer delay for power stabilization
 
     // Log MAC address for debugging
-    Serial.printf("[WiFi] MAC Address: %s\n", WiFi.macAddress().c_str());
+    LOG_INFO("[WiFi] MAC Address: %s",WiFi.macAddress().c_str());
 
     // Set WiFi mode to off initially
     WiFi.mode(WIFI_OFF);
@@ -40,18 +41,18 @@ bool WiFiManager::begin() {
     // Register event handler
     WiFi.onEvent(wifiEventHandler);
 
-    Serial.println("[WiFi] WiFi subsystem initialized");
+    LOG_INFO("[WiFi] WiFi subsystem initialized");
     return true;
 }
 
 bool WiFiManager::connectSTA(const char* ssid, const char* password, uint32_t timeout_ms) {
     if (ssid == nullptr || strlen(ssid) == 0) {
-        Serial.println("[WiFi] Error: No SSID provided");
+        LOG_INFO("[WiFi] Error: No SSID provided");
         setState(WiFiState::ERROR);
         return false;
     }
 
-    Serial.printf("[WiFi] Connecting to '%s'...\n", ssid);
+    LOG_INFO("[WiFi] Connecting to '%s'...",ssid);
 
     // Store credentials for auto-reconnect
     sta_ssid_ = ssid;
@@ -75,23 +76,22 @@ bool WiFiManager::connectSTA(const char* ssid, const char* password, uint32_t ti
             Serial.print(".");
         }
     }
-    Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
         connected_since_ = millis();
         setState(WiFiState::CONNECTED);
-        Serial.printf("[WiFi] Connected! IP: %s, RSSI: %d dBm\n",
+        LOG_INFO("[WiFi] Connected! IP: %s, RSSI: %d dBm\n",
                      WiFi.localIP().toString().c_str(), WiFi.RSSI());
         return true;
     } else {
-        Serial.println("[WiFi] Connection failed");
+        LOG_INFO("[WiFi] Connection failed");
         setState(WiFiState::DISCONNECTED);
         return false;
     }
 }
 
 bool WiFiManager::startAP(const char* ssid, const char* password) {
-    Serial.printf("[WiFi] Starting AP mode: %s\n", ssid);
+    LOG_INFO("[WiFi] Starting AP mode: %s",ssid);
 
     // Set low TX power before mode change to reduce current spike
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
@@ -104,26 +104,26 @@ bool WiFiManager::startAP(const char* ssid, const char* password) {
     if (password && strlen(password) >= 8) {
         // WiFi.softAP(ssid, password, channel, hidden, max_connections)
         success = WiFi.softAP(ssid, password, 1, false, 4);
-        Serial.printf("[WiFi] Starting secured AP on channel 1\n");
+        LOG_INFO("[WiFi] Starting secured AP on channel 1\n");
     } else {
         success = WiFi.softAP(ssid, "", 1, false, 4);
         if (password && strlen(password) > 0) {
-            Serial.println("[WiFi] Warning: Password too short, AP is open");
+            LOG_INFO("[WiFi] Warning: Password too short, AP is open");
         }
-        Serial.printf("[WiFi] Starting open AP on channel 1\n");
+        LOG_INFO("[WiFi] Starting open AP on channel 1\n");
     }
 
     if (success) {
         ap_active_ = true;
         setState(WiFiState::AP_MODE);
-        Serial.printf("[WiFi] AP started successfully!\n");
-        Serial.printf("[WiFi] SSID: %s\n", ssid);
-        Serial.printf("[WiFi] Password: %s\n", (password && strlen(password) >= 8) ? password : "(open)");
-        Serial.printf("[WiFi] IP: %s\n", WiFi.softAPIP().toString().c_str());
-        Serial.printf("[WiFi] MAC: %s\n", WiFi.softAPmacAddress().c_str());
+        LOG_INFO("[WiFi] AP started successfully!\n");
+        LOG_INFO("[WiFi] SSID: %s",ssid);
+        LOG_INFO("[WiFi] Password: %s",(password && strlen(password) >= 8) ? password : "(open)");
+        LOG_INFO("[WiFi] IP: %s",WiFi.softAPIP().toString().c_str());
+        LOG_INFO("[WiFi] MAC: %s",WiFi.softAPmacAddress().c_str());
         return true;
     } else {
-        Serial.println("[WiFi] Failed to start AP");
+        LOG_INFO("[WiFi] Failed to start AP");
         setState(WiFiState::ERROR);
         return false;
     }
@@ -131,7 +131,7 @@ bool WiFiManager::startAP(const char* ssid, const char* password) {
 
 bool WiFiManager::startAPSTA(const char* sta_ssid, const char* sta_password,
                              const char* ap_ssid, const char* ap_password) {
-    Serial.println("[WiFi] Starting AP+STA mode");
+    LOG_INFO("[WiFi] Starting AP+STA mode");
 
     // Set low TX power before mode change to reduce current spike
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
@@ -145,21 +145,21 @@ bool WiFiManager::startAPSTA(const char* sta_ssid, const char* sta_password,
     if (ap_password && strlen(ap_password) >= 8) {
         // WiFi.softAP(ssid, password, channel, hidden, max_connections)
         ap_success = WiFi.softAP(ap_ssid, ap_password, 1, false, 4);
-        Serial.printf("[WiFi] Starting secured AP on channel 1\n");
+        LOG_INFO("[WiFi] Starting secured AP on channel 1\n");
     } else {
         ap_success = WiFi.softAP(ap_ssid, "", 1, false, 4);
-        Serial.printf("[WiFi] Starting open AP on channel 1\n");
+        LOG_INFO("[WiFi] Starting open AP on channel 1\n");
     }
 
     if (ap_success) {
         ap_active_ = true;
-        Serial.printf("[WiFi] AP started successfully!\n");
-        Serial.printf("[WiFi] AP SSID: %s\n", ap_ssid);
-        Serial.printf("[WiFi] AP Password: %s\n", (ap_password && strlen(ap_password) >= 8) ? ap_password : "(open)");
-        Serial.printf("[WiFi] AP IP: %s\n", WiFi.softAPIP().toString().c_str());
-        Serial.printf("[WiFi] AP MAC: %s\n", WiFi.softAPmacAddress().c_str());
+        LOG_INFO("[WiFi] AP started successfully!\n");
+        LOG_INFO("[WiFi] AP SSID: %s",ap_ssid);
+        LOG_INFO("[WiFi] AP Password: %s",(ap_password && strlen(ap_password) >= 8) ? ap_password : "(open)");
+        LOG_INFO("[WiFi] AP IP: %s",WiFi.softAPIP().toString().c_str());
+        LOG_INFO("[WiFi] AP MAC: %s",WiFi.softAPmacAddress().c_str());
     } else {
-        Serial.println("[WiFi] Warning: Failed to start AP");
+        LOG_INFO("[WiFi] Warning: Failed to start AP");
     }
 
     // Then connect to STA
@@ -167,7 +167,7 @@ bool WiFiManager::startAPSTA(const char* sta_ssid, const char* sta_password,
         sta_ssid_ = sta_ssid;
         sta_password_ = sta_password ? sta_password : "";
 
-        Serial.printf("[WiFi] Attempting STA connection to: %s\n", sta_ssid);
+        LOG_INFO("[WiFi] Attempting STA connection to: %s",sta_ssid);
         WiFi.begin(sta_ssid, sta_password);
         setState(WiFiState::CONNECTING);
         connection_attempts_++;
@@ -180,7 +180,7 @@ bool WiFiManager::startAPSTA(const char* sta_ssid, const char* sta_password,
 }
 
 void WiFiManager::stop() {
-    Serial.println("[WiFi] Stopping WiFi");
+    LOG_INFO("[WiFi] Stopping WiFi");
     WiFi.disconnect(true);
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_OFF);
@@ -195,7 +195,7 @@ void WiFiManager::update() {
         sta_ssid_.length() > 0 &&
         (millis() - last_reconnect_attempt_) > reconnect_delay_) {
 
-        Serial.println("[WiFi] Attempting auto-reconnect...");
+        LOG_INFO("[WiFi] Attempting auto-reconnect...");
         connection_attempts_++;
         last_reconnect_attempt_ = millis();
 
@@ -208,9 +208,9 @@ void WiFiManager::update() {
         if (WiFi.status() == WL_CONNECTED) {
             connected_since_ = millis();
             setState(WiFiState::CONNECTED);
-            Serial.printf("[WiFi] Reconnected! IP: %s\n", WiFi.localIP().toString().c_str());
+            LOG_INFO("[WiFi] Reconnected! IP: %s",WiFi.localIP().toString().c_str());
         } else if ((millis() - last_reconnect_attempt_) > WIFI_CONNECTION_TIMEOUT) {
-            Serial.println("[WiFi] Connection attempt timed out");
+            LOG_INFO("[WiFi] Connection attempt timed out");
             setState(WiFiState::DISCONNECTED);
         }
     }
@@ -251,7 +251,7 @@ void WiFiManager::setState(WiFiState new_state) {
         const char* state_names[] = {
             "DISCONNECTED", "CONNECTING", "CONNECTED", "AP_MODE", "ERROR"
         };
-        Serial.printf("[WiFi] State changed to: %s\n", state_names[static_cast<int>(new_state)]);
+        LOG_INFO("[WiFi] State changed to: %s",state_names[static_cast<int>(new_state)]);
 
         // Invoke callback if set
         if (state_callback_) {
@@ -268,13 +268,13 @@ void WiFiManager::wifiEventHandler(WiFiEvent_t event, WiFiEventInfo_t info) {
 void WiFiManager::onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     switch (event) {
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-            Serial.printf("[WiFi] Got IP: %s\n", WiFi.localIP().toString().c_str());
+            LOG_INFO("[WiFi] Got IP: %s",WiFi.localIP().toString().c_str());
             connected_since_ = millis();
             setState(WiFiState::CONNECTED);
             break;
 
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-            Serial.printf("[WiFi] Disconnected (reason: %d)\n", info.wifi_sta_disconnected.reason);
+            LOG_INFO("[WiFi] Disconnected (reason: %d)",info.wifi_sta_disconnected.reason);
             disconnect_count_++;
             if (ap_active_) {
                 setState(WiFiState::AP_MODE);
@@ -284,18 +284,18 @@ void WiFiManager::onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
             break;
 
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
-            Serial.println("[WiFi] Station connected to AP");
+            LOG_INFO("[WiFi] Station connected to AP");
             break;
 
         case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
-            Serial.printf("[WiFi] Client connected to AP, MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+            LOG_INFO("[WiFi] Client connected to AP, MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
                          info.wifi_ap_staconnected.mac[0], info.wifi_ap_staconnected.mac[1],
                          info.wifi_ap_staconnected.mac[2], info.wifi_ap_staconnected.mac[3],
                          info.wifi_ap_staconnected.mac[4], info.wifi_ap_staconnected.mac[5]);
             break;
 
         case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
-            Serial.println("[WiFi] Client disconnected from AP");
+            LOG_INFO("[WiFi] Client disconnected from AP");
             break;
 
         default:

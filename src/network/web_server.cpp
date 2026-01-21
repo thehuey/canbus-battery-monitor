@@ -3,6 +3,7 @@
 #include "../config/settings.h"
 #include "../battery/battery_manager.h"
 #include "../can/can_logger.h"
+#include "../can/can_driver.h"
 #include "../utils/remote_log.h"
 #include <SPIFFS.h>
 
@@ -25,16 +26,18 @@ WebServer::~WebServer() {
     stop();
 }
 
-bool WebServer::begin(SettingsManager* settings, BatteryManager* batteries, CANLogger* canLog) {
+bool WebServer::begin(SettingsManager* settings, BatteryManager* batteries, CANLogger* canLog,
+                      Protocol::Loader* protocolLoader) {
     settings_ = settings;
     batteries_ = batteries;
     can_logger_ = canLog;
+    protocol_loader_ = protocolLoader;
 
-    Serial.printf("[WebServer] Starting on port %d\n", port_);
+    LOG_INFO("[WebServer] Starting on port %d",port_);
 
     // Initialize SPIFFS for static files
     if (!SPIFFS.begin(true)) {
-        Serial.println("[WebServer] Warning: SPIFFS mount failed, no static files will be served");
+        LOG_INFO("[WebServer] Warning: SPIFFS mount failed, no static files will be served");
     }
 
     // Setup handlers
@@ -44,7 +47,7 @@ bool WebServer::begin(SettingsManager* settings, BatteryManager* batteries, CANL
 
     // Start server
     server_.begin();
-    Serial.println("[WebServer] Server started");
+    LOG_INFO("[WebServer] Server started");
 
     return true;
 }
@@ -52,7 +55,7 @@ bool WebServer::begin(SettingsManager* settings, BatteryManager* batteries, CANL
 void WebServer::stop() {
     ws_.closeAll();
     server_.end();
-    Serial.println("[WebServer] Server stopped");
+    LOG_INFO("[WebServer] Server stopped");
 }
 
 void WebServer::setupWebSocket() {
@@ -62,7 +65,7 @@ void WebServer::setupWebSocket() {
     });
 
     server_.addHandler(&ws_);
-    Serial.println("[WebServer] WebSocket handler registered at /ws");
+    LOG_INFO("[WebServer] WebSocket handler registered at /ws");
 }
 
 void WebServer::setupStaticFiles() {
@@ -304,12 +307,18 @@ void WebServer::setupAPIEndpoints() {
         handleGetLogs(request);
     });
 
+    // GET /api/can/diagnostics - CAN bus diagnostics
+    server_.on("/api/can/diagnostics", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        handleGetCANDiagnostics(request);
+    });
+
     // Handle 404
     server_.onNotFound([this](AsyncWebServerRequest* request) {
         handleNotFound(request);
     });
 
-    Serial.println("[WebServer] API endpoints registered");
+    LOG_INFO("[WebServer] API endpoints registered");
 }
 
 // API Handlers
@@ -630,6 +639,19 @@ void WebServer::handleGetLogs(AsyncWebServerRequest* request) {
     sendJSON(request, doc);
 }
 
+void WebServer::handleGetCANDiagnostics(AsyncWebServerRequest* request) {
+    char buffer[1024];
+
+    if (canDriver.getDiagnostics(buffer, sizeof(buffer))) {
+        // Return as plain text for readability
+        AsyncWebServerResponse* response = request->beginResponse(200, "text/plain", buffer);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    } else {
+        sendError(request, 500, "Failed to get CAN diagnostics");
+    }
+}
+
 void WebServer::handleNotFound(AsyncWebServerRequest* request) {
     sendError(request, 404, "Not found");
 }
@@ -639,7 +661,7 @@ void WebServer::onWSEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                           AwsEventType type, void* arg, uint8_t* data, size_t len) {
     switch (type) {
         case WS_EVT_CONNECT:
-            Serial.printf("[WebSocket] Client #%u connected from %s\n",
+            LOG_DEBUG("[WebSocket] Client #%u connected from %s\n",
                          client->id(), client->remoteIP().toString().c_str());
             if (client_callback_) {
                 client_callback_(client->id(), true);
@@ -657,7 +679,7 @@ void WebServer::onWSEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
             break;
 
         case WS_EVT_DISCONNECT:
-            Serial.printf("[WebSocket] Client #%u disconnected\n", client->id());
+            LOG_DEBUG("[WebSocket] Client #%u disconnected",client->id());
             if (client_callback_) {
                 client_callback_(client->id(), false);
             }
@@ -669,7 +691,7 @@ void WebServer::onWSEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                 AwsFrameInfo* info = (AwsFrameInfo*)arg;
                 if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
                     data[len] = 0;  // Null-terminate
-                    Serial.printf("[WebSocket] Received: %s\n", (char*)data);
+                    LOG_DEBUG("[WebSocket] Received: %s",(char*)data);
                     // Could handle client commands here
                 }
             }
@@ -902,6 +924,15 @@ void WebServer::buildSystemJSON(JsonObject obj) {
         obj["wifi_ssid"] = WiFi.SSID();
         obj["wifi_rssi"] = WiFi.RSSI();
         obj["wifi_ip"] = WiFi.localIP().toString();
+    }
+
+    // CAN bus stats
+    if (can_logger_ != nullptr) {
+        obj["can_message_count"] = can_logger_->getMessageCount();
+        obj["can_dropped_count"] = can_logger_->getDroppedCount();
+    } else {
+        obj["can_message_count"] = 0;
+        obj["can_dropped_count"] = 0;
     }
 
     // Web server stats

@@ -4,6 +4,13 @@
 #include <Arduino.h>
 #include "config.h"
 
+// Protocol selection for battery
+enum class ProtocolSource : uint8_t {
+    BUILTIN_DPOWER_48V = 0,         // Built-in D-power 48V 13S
+    BUILTIN_GENERIC_BMS = 1,        // Built-in Generic BMS
+    CUSTOM_PROTOCOL = 100           // Custom protocol from SPIFFS
+};
+
 // Battery-specific configuration
 struct BatteryConfig {
     bool enabled;
@@ -12,6 +19,11 @@ struct BatteryConfig {
     float current_cal_scale;        // mV per Amp
     float voltage_cal_scale;        // Voltage divider ratio
     uint32_t can_base_id;           // Base CAN ID for this battery (0 = auto)
+
+    // Protocol Configuration
+    ProtocolSource protocol_source; // Which protocol to use
+    char protocol_path[48];         // Path to custom protocol (if source == CUSTOM_PROTOCOL)
+                                    // e.g., "/protocols/custom_0.json"
 };
 
 // Global system settings

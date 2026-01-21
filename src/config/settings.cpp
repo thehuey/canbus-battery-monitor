@@ -99,6 +99,14 @@ bool SettingsManager::load() {
 
         snprintf(key, sizeof(key), "bat%d_can_id", i);
         settings.batteries[i].can_base_id = preferences.getUInt(key, 0);
+
+        snprintf(key, sizeof(key), "bat%d_proto_src", i);
+        settings.batteries[i].protocol_source = static_cast<ProtocolSource>(
+            preferences.getUChar(key, static_cast<uint8_t>(ProtocolSource::BUILTIN_DPOWER_48V)));
+
+        snprintf(key, sizeof(key), "bat%d_proto_path", i);
+        preferences.getString(key, settings.batteries[i].protocol_path,
+                            sizeof(settings.batteries[i].protocol_path));
     }
 
     settings.magic = magic;
@@ -159,6 +167,12 @@ bool SettingsManager::save() {
 
         snprintf(key, sizeof(key), "bat%d_can_id", i);
         preferences.putUInt(key, settings.batteries[i].can_base_id);
+
+        snprintf(key, sizeof(key), "bat%d_proto_src", i);
+        preferences.putUChar(key, static_cast<uint8_t>(settings.batteries[i].protocol_source));
+
+        snprintf(key, sizeof(key), "bat%d_proto_path", i);
+        preferences.putString(key, settings.batteries[i].protocol_path);
     }
 
     preferences.end();
@@ -204,6 +218,8 @@ void SettingsManager::setDefaults() {
         settings.batteries[i].current_cal_scale = ACS712_20A_SENSITIVITY;
         settings.batteries[i].voltage_cal_scale = VOLTAGE_DIVIDER_RATIO;
         settings.batteries[i].can_base_id = 0;  // Auto-detect
+        settings.batteries[i].protocol_source = ProtocolSource::BUILTIN_DPOWER_48V;
+        strlcpy(settings.batteries[i].protocol_path, "", sizeof(settings.batteries[i].protocol_path));
     }
 
     // Set magic number
@@ -324,6 +340,20 @@ void SettingsManager::printSettings() const {
         Serial.printf("    CAN Base ID: 0x%03X %s\n",
                      settings.batteries[i].can_base_id,
                      settings.batteries[i].can_base_id == 0 ? "(auto)" : "");
+
+        // Print protocol info
+        const char* proto_name = "Unknown";
+        if (settings.batteries[i].protocol_source == ProtocolSource::BUILTIN_DPOWER_48V) {
+            proto_name = "D-power 48V 13S (built-in)";
+        } else if (settings.batteries[i].protocol_source == ProtocolSource::BUILTIN_GENERIC_BMS) {
+            proto_name = "Generic BMS (built-in)";
+        } else if (settings.batteries[i].protocol_source == ProtocolSource::CUSTOM_PROTOCOL) {
+            proto_name = "Custom";
+        }
+        Serial.printf("    Protocol: %s\n", proto_name);
+        if (settings.batteries[i].protocol_source == ProtocolSource::CUSTOM_PROTOCOL) {
+            Serial.printf("    Protocol Path: %s\n", settings.batteries[i].protocol_path);
+        }
     }
 
     Serial.println("\n======================================\n");
