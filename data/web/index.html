@@ -176,6 +176,42 @@
               </form>
             </div>
 
+            <!-- CAN Logging & Publishing -->
+            <div class="settings-section">
+              <h3>CAN Logging & Publishing</h3>
+              <form id="canLoggingForm">
+                <div class="form-group checkbox-group">
+                  <label class="checkbox-label">
+                    <input
+                      type="checkbox"
+                      id="canLogEnabled"
+                      name="can_log_enabled"
+                    />
+                    <span class="checkbox-text">
+                      <strong>Local CAN Logging</strong>
+                      <small class="form-help">Store CAN messages to SPIFFS (/api/canlog)</small>
+                    </span>
+                  </label>
+                </div>
+                <div class="form-group checkbox-group">
+                  <label class="checkbox-label">
+                    <input
+                      type="checkbox"
+                      id="mqttCanmsgEnabled"
+                      name="mqtt_canmsg_enabled"
+                    />
+                    <span class="checkbox-text">
+                      <strong>MQTT CAN Publishing</strong>
+                      <small class="form-help">Publish CAN messages to MQTT topic: &lt;prefix&gt;/canmsg</small>
+                    </span>
+                  </label>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                  Save CAN Settings
+                </button>
+              </form>
+            </div>
+
             <!-- System Actions -->
             <div class="settings-section">
               <h3>System Actions</h3>

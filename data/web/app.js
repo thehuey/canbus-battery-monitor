@@ -48,6 +48,12 @@ class BatteryMonitor {
             this.saveMQTTConfig();
         });
 
+        // CAN Logging form
+        document.getElementById('canLoggingForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveCANLoggingConfig();
+        });
+
         // Reboot button
         document.getElementById('rebootBtn').addEventListener('click', () => {
             if (confirm('Are you sure you want to reboot the device?')) {
@@ -346,6 +352,10 @@ class BatteryMonitor {
         document.getElementById('mqttPort').value = this.config.mqtt_port || 1883;
         document.getElementById('mqttUsername').value = this.config.mqtt_username || '';
         document.getElementById('mqttTopicPrefix').value = this.config.mqtt_topic_prefix || 'ebike';
+
+        // CAN Logging
+        document.getElementById('canLogEnabled').checked = this.config.can_log_enabled !== false;
+        document.getElementById('mqttCanmsgEnabled').checked = this.config.mqtt_canmsg_enabled === true;
     }
 
     async saveWiFiConfig() {
@@ -424,6 +434,36 @@ class BatteryMonitor {
             }
         } catch (error) {
             console.error('Error saving MQTT config:', error);
+            this.showToast('Network error - check connection', 'error');
+        }
+    }
+
+    async saveCANLoggingConfig() {
+        const config = {
+            can_log_enabled: document.getElementById('canLogEnabled').checked,
+            mqtt_canmsg_enabled: document.getElementById('mqttCanmsgEnabled').checked
+        };
+
+        try {
+            const response = await fetch('/api/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(config)
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                this.showToast('CAN logging settings saved!', 'success');
+                // Reload config to update the form
+                this.loadConfig();
+            } else {
+                this.showToast(result.message || 'Failed to save CAN settings', 'error');
+            }
+        } catch (error) {
+            console.error('Error saving CAN logging config:', error);
             this.showToast('Network error - check connection', 'error');
         }
     }
