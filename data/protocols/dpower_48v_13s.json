@@ -11,33 +11,28 @@
     {
       "can_id": 513,
       "can_id_hex": "0x201",
-      "name": "Pack Configuration",
-      "description": "Static pack configuration data",
+      "name": "Pack Identification",
+      "description": "Manufacturing date and serial number encoded as YYDDMMSSSS decimal format",
       "period_ms": 1000,
       "fields": [
         {
-          "name": "unknown_word_1",
-          "description": "Unknown 16-bit value",
+          "name": "pack_identifier",
+          "description": "32-bit manufacturing identifier in decimal format YYDDMMSSSS. YY=year (add 2000), DD=day, MM=month, SSSS=4-digit serial number. Example: 2018095346 means manufactured Sept 18, 2020, serial 5346",
           "byte_offset": 0,
-          "length": 2,
-          "data_type": "uint16_le",
+          "length": 4,
+          "data_type": "uint32_le",
           "unit": null,
           "scale": 1.0,
           "offset": 0.0,
-          "min_value": null,
-          "max_value": null
-        },
-        {
-          "name": "pack_voltage_raw",
-          "description": "Pack voltage raw value (purpose unclear)",
-          "byte_offset": 2,
-          "length": 2,
-          "data_type": "uint16_le",
-          "unit": null,
-          "scale": 0.1,
-          "offset": 0.0,
-          "min_value": null,
-          "max_value": null
+          "min_value": 2000010100,
+          "max_value": 9999123199,
+          "format": "YYDDMMSSSS",
+          "decode_formula": {
+            "year": "(value / 100000000) + 2000",
+            "day": "(value / 1000000) % 100",
+            "month": "(value / 10000) % 100",
+            "serial": "value % 10000"
+          }
         }
       ]
     },
@@ -57,7 +52,7 @@
           "unit": "mV",
           "scale": 1.0,
           "offset": 0.0,
-          "min_value": 39000,
+          "min_value": 38000,
           "max_value": 54600
         },
         {
@@ -78,17 +73,17 @@
     {
       "can_id": 515,
       "can_id_hex": "0x203",
-      "name": "Cell Data",
-      "description": "Individual cell voltages with rotating index",
+      "name": "Remaining Capacity and Max Capacity",
+      "description": "Pack current Ah and max capacity",
       "period_ms": 50,
       "fields": [
         {
-          "name": "cell_index",
-          "description": "Cell index counter (increments sequentially)",
+          "name": "remaining_milliamp_hours",
+          "description": "Remaining capacity in milliamp-hours",
           "byte_offset": 0,
-          "length": 1,
-          "data_type": "uint8",
-          "unit": null,
+          "length": 2,
+          "data_type": "uint16_le",
+          "unit": "mAh",
           "scale": 1.0,
           "offset": 0.0,
           "min_value": 0,

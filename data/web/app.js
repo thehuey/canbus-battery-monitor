@@ -182,11 +182,32 @@ class BatteryMonitor {
         const statusClass = battery.has_error ? 'error' : 'ok';
         const statusText = battery.has_error ? 'Error' : 'OK';
 
+        // Parse pack identifier if available
+        let packInfoHTML = '';
+        if (battery.pack_identifier) {
+            const packInfo = this.parsePackIdentifier(battery.pack_identifier);
+            if (packInfo) {
+                packInfoHTML = `
+                    <div class="battery-info">
+                        <div class="info-item">
+                            <span class="info-icon">📅</span>
+                            <span class="info-text">${packInfo.date}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-icon">🔢</span>
+                            <span class="info-text">S/N: ${packInfo.serial}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
         card.innerHTML = `
             <div class="battery-header">
                 <div class="battery-name">${this.escapeHtml(battery.name || `Battery ${battery.id}`)}</div>
                 <div class="battery-status ${statusClass}">${statusText}</div>
             </div>
+            ${packInfoHTML}
             <div class="battery-metrics">
                 <div class="metric">
                     <span class="metric-label">Voltage</span>
@@ -208,6 +229,49 @@ class BatteryMonitor {
         `;
 
         return card;
+    }
+
+    /**
+     * Parse D-power pack identifier format: YYDDMMSSSS
+     * @param {number} identifier - The 32-bit pack identifier value
+     * @returns {object|null} - Parsed date and serial, or null if invalid
+     */
+    parsePackIdentifier(identifier) {
+        if (!identifier || identifier <= 0) return null;
+
+        try {
+            // Convert to string and ensure it's the right length
+            const idStr = identifier.toString();
+
+            // Extract components using decimal division/modulo
+            const year = Math.floor(identifier / 100000000) + 2000;
+            const day = Math.floor(identifier / 1000000) % 100;
+            const month = Math.floor(identifier / 10000) % 100;
+            const serial = identifier % 10000;
+
+            // Validate ranges
+            if (year < 2000 || year > 2099) return null;
+            if (month < 1 || month > 12) return null;
+            if (day < 1 || day > 31) return null;
+
+            // Format date nicely
+            const monthNames = [
+                'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+            ];
+            const dateStr = `${monthNames[month - 1]} ${day}, ${year}`;
+
+            return {
+                date: dateStr,
+                serial: serial.toString().padStart(4, '0'),
+                year: year,
+                month: month,
+                day: day
+            };
+        } catch (error) {
+            console.error('Error parsing pack identifier:', error);
+            return null;
+        }
     }
 
     updateSystemStatus(data) {

@@ -26,10 +26,12 @@ struct CANBatteryData {
     float temp1;                // Temperature sensor 1 (°C)
     float temp2;                // Temperature sensor 2 (°C)
     uint8_t status_flags;       // Status bits
+    uint32_t pack_identifier;   // Manufacturing date/serial (YYDDMMSSSS format)
     bool valid;                 // Data is valid
 
     CANBatteryData() : battery_id(0), pack_voltage(0), pack_current(0),
-                       soc(0), temp1(0), temp2(0), status_flags(0), valid(false) {}
+                       soc(0), temp1(0), temp2(0), status_flags(0),
+                       pack_identifier(0), valid(false) {}
 };
 
 // Status flag definitions

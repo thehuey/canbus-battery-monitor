@@ -93,6 +93,9 @@ bool CANParser::parseWithProtocol(const CANMessage& msg, CANBatteryData& data) {
         else if (strcmp(field.name, "state") == 0 || strcmp(field.name, "status_flags") == 0) {
             data.status_flags = static_cast<uint8_t>(value);
         }
+        else if (strcmp(field.name, "pack_identifier") == 0) {
+            data.pack_identifier = static_cast<uint32_t>(value);
+        }
     }
 
     return true;

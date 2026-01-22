@@ -28,6 +28,7 @@ public:
     float getTemp1() const { return temp1; }
     float getTemp2() const { return temp2; }
     uint8_t getStatusFlags() const { return status_flags; }
+    uint32_t getPackIdentifier() const { return pack_identifier; }
     uint32_t getLastUpdate() const { return last_update; }
     bool hasError() const { return error; }
 
@@ -52,6 +53,7 @@ private:
     float temp1;                // Temperature 1 (°C)
     float temp2;                // Temperature 2 (°C)
     uint8_t status_flags;       // Status bits from CAN
+    uint32_t pack_identifier;   // Manufacturing date/serial (YYDDMMSSSS format)
 
     // State
     bool has_can_data;

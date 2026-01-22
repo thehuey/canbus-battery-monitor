@@ -833,6 +833,7 @@ void WebServer::buildBatteryJSON(JsonObject obj, uint8_t id) {
     obj["temp1"] = battery->getTemp1();
     obj["temp2"] = battery->getTemp2();
     obj["status_flags"] = battery->getStatusFlags();
+    obj["pack_identifier"] = battery->getPackIdentifier();
     obj["has_can_data"] = battery->hasCANData();
     obj["has_error"] = battery->hasError();
     obj["last_update"] = battery->getLastUpdate();

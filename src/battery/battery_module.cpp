@@ -9,6 +9,7 @@ BatteryModule::BatteryModule()
       temp1(0.0f),
       temp2(0.0f),
       status_flags(0),
+      pack_identifier(0),
       has_can_data(false),
       error(false),
       last_update(0) {
@@ -48,6 +49,7 @@ void BatteryModule::updateFromCAN(const CANBatteryData& can_data) {
     temp1 = can_data.temp1;
     temp2 = can_data.temp2;
     status_flags = can_data.status_flags;
+    pack_identifier = can_data.pack_identifier;
 
     has_can_data = can_data.valid;
     last_update = millis();

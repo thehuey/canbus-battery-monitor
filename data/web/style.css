@@ -178,6 +178,33 @@ body {
     background: var(--danger-color);
 }
 
+/* Battery Pack Info */
+.battery-info {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    padding: 0.5rem;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    font-size: 0.875rem;
+}
+
+.info-item {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    color: var(--text-secondary);
+}
+
+.info-icon {
+    font-size: 1rem;
+}
+
+.info-text {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
 .battery-metrics {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
