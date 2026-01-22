@@ -39,6 +39,8 @@ struct Settings {
 
     // CAN Configuration
     uint32_t can_bitrate;           // Fixed at 500000
+    bool can_log_enabled;           // Enable local SPIFFS CAN logging (default: true)
+    bool mqtt_canmsg_enabled;       // Enable MQTT CAN message publishing (default: false)
 
     // Timing Configuration
     uint16_t publish_interval_ms;   // MQTT publish rate (default: 1000)

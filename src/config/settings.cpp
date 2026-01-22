@@ -59,6 +59,8 @@ bool SettingsManager::load() {
 
     // Load CAN configuration
     settings.can_bitrate = preferences.getUInt("can_bitrate", CAN_BITRATE);
+    settings.can_log_enabled = preferences.getBool("can_log_en", true);
+    settings.mqtt_canmsg_enabled = preferences.getBool("mqtt_canmsg", false);
 
     // Load timing configuration
     settings.publish_interval_ms = preferences.getUShort("pub_interval", DEFAULT_PUBLISH_INTERVAL_MS);
@@ -137,6 +139,8 @@ bool SettingsManager::save() {
 
     // Save CAN configuration
     preferences.putUInt("can_bitrate", settings.can_bitrate);
+    preferences.putBool("can_log_en", settings.can_log_enabled);
+    preferences.putBool("mqtt_canmsg", settings.mqtt_canmsg_enabled);
 
     // Save timing configuration
     preferences.putUShort("pub_interval", settings.publish_interval_ms);
@@ -201,6 +205,8 @@ void SettingsManager::setDefaults() {
 
     // CAN defaults
     settings.can_bitrate = CAN_BITRATE;
+    settings.can_log_enabled = true;        // Local logging enabled by default
+    settings.mqtt_canmsg_enabled = false;   // MQTT CAN messages disabled by default
 
     // Timing defaults
     settings.publish_interval_ms = DEFAULT_PUBLISH_INTERVAL_MS;

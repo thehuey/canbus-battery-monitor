@@ -1,6 +1,7 @@
 #include "mqtt_client.h"
 #include "../config/settings.h"
 #include "../battery/battery_manager.h"
+#include "../can/can_message.h"
 #include "../utils/remote_log.h"
 #include <ArduinoJson.h>
 
@@ -369,6 +370,46 @@ bool MQTTClient::publishCANRaw(uint32_t can_id, uint8_t dlc, const uint8_t* data
     const Settings& config = settings_->getSettings();
     snprintf(topic, sizeof(topic), "%s/can/raw",
              config.mqtt_topic_prefix);
+
+    return publish(topic, payload.c_str(), false);
+}
+
+bool MQTTClient::publishCANMessage(const CANMessage& msg) {
+    if (!isConnected()) {
+        return false;
+    }
+
+    // Check if CAN message publishing is enabled
+    const Settings& config = settings_->getSettings();
+    if (!config.mqtt_canmsg_enabled) {
+        return false;  // Silently skip if disabled
+    }
+
+    JsonDocument doc;
+
+    // Format CAN ID as hex string
+    char id_str[12];
+    snprintf(id_str, sizeof(id_str), "0x%03X", msg.id);
+    doc["id"] = id_str;
+    doc["dlc"] = msg.dlc;
+    doc["extended"] = msg.extended;
+    doc["rtr"] = msg.rtr;
+    doc["timestamp"] = msg.timestamp;
+
+    // Convert data bytes to hex string array for readability
+    JsonArray data_array = doc["data"].to<JsonArray>();
+    for (uint8_t i = 0; i < msg.dlc && i < 8; i++) {
+        char byte_str[4];
+        snprintf(byte_str, sizeof(byte_str), "%02X", msg.data[i]);
+        data_array.add(byte_str);
+    }
+
+    String payload;
+    serializeJson(doc, payload);
+
+    // Build topic: <prefix>/canmsg
+    char topic[64];
+    snprintf(topic, sizeof(topic), "%s/canmsg", config.mqtt_topic_prefix);
 
     return publish(topic, payload.c_str(), false);
 }

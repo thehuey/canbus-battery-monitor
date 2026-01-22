@@ -10,6 +10,7 @@
 // Forward declarations
 class SettingsManager;
 class BatteryManager;
+struct CANMessage;
 
 // MQTT connection state
 enum class MQTTState {
@@ -41,6 +42,7 @@ public:
     bool publishAllBatteries();
     bool publishSystemStatus();
     bool publishCANRaw(uint32_t can_id, uint8_t dlc, const uint8_t* data);
+    bool publishCANMessage(const CANMessage& msg);  // New: Publish CAN message to canmsg topic
     bool publishConfig();
 
     // Generic publish

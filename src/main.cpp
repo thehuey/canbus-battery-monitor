@@ -244,10 +244,19 @@ void setupCANBus() {
         return;
     }
 
-    // Set up message callback for logging
+    // Set up message callback for logging and MQTT publishing
     canDriver.setMessageCallback([](const CANMessage& msg) {
-        // Log every message
-        canLogger.logMessage(msg);
+        const Settings& settings = settingsManager.getSettings();
+
+        // Log to local storage if enabled
+        if (settings.can_log_enabled) {
+            canLogger.logMessage(msg);
+        }
+
+        // Publish to MQTT if enabled
+        if (settings.mqtt_canmsg_enabled) {
+            mqttClient.publishCANMessage(msg);
+        }
 
         // Parse battery data
         CANBatteryData battData;

@@ -523,6 +523,15 @@ void WebServer::handlePostConfig(AsyncWebServerRequest* request, uint8_t* data, 
     if (!doc["web_refresh_ms"].isNull()) {
         settings.web_refresh_ms = doc["web_refresh_ms"] | DEFAULT_WEB_REFRESH_MS;
     }
+    if (!doc["can_bitrate"].isNull()) {
+        settings.can_bitrate = doc["can_bitrate"] | CAN_BITRATE;
+    }
+    if (!doc["can_log_enabled"].isNull()) {
+        settings.can_log_enabled = doc["can_log_enabled"] | true;
+    }
+    if (!doc["mqtt_canmsg_enabled"].isNull()) {
+        settings.mqtt_canmsg_enabled = doc["mqtt_canmsg_enabled"] | false;
+    }
     if (!doc["num_batteries"].isNull()) {
         settings.num_batteries = constrain(doc["num_batteries"] | 1, 1, MAX_BATTERY_MODULES);
     }
@@ -892,6 +901,8 @@ void WebServer::buildConfigJSON(JsonObject obj) {
 
     // CAN
     obj["can_bitrate"] = settings.can_bitrate;
+    obj["can_log_enabled"] = settings.can_log_enabled;
+    obj["mqtt_canmsg_enabled"] = settings.mqtt_canmsg_enabled;
 
     // Batteries
     obj["num_batteries"] = settings.num_batteries;
