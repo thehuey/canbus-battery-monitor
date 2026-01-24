@@ -527,10 +527,10 @@ void WebServer::handlePostConfig(AsyncWebServerRequest* request, uint8_t* data, 
         settings.can_bitrate = doc["can_bitrate"] | CAN_BITRATE;
     }
     if (!doc["can_log_enabled"].isNull()) {
-        settings.can_log_enabled = doc["can_log_enabled"] | true;
+        settings.can_log_enabled = doc["can_log_enabled"].as<bool>();
     }
     if (!doc["mqtt_canmsg_enabled"].isNull()) {
-        settings.mqtt_canmsg_enabled = doc["mqtt_canmsg_enabled"] | false;
+        settings.mqtt_canmsg_enabled = doc["mqtt_canmsg_enabled"].as<bool>();
     }
     if (!doc["num_batteries"].isNull()) {
         settings.num_batteries = constrain(doc["num_batteries"] | 1, 1, MAX_BATTERY_MODULES);
@@ -543,6 +543,7 @@ void WebServer::handlePostConfig(AsyncWebServerRequest* request, uint8_t* data, 
         resp["message"] = "Configuration saved";
         sendJSON(request, resp);
     } else {
+        LOG_ERROR("[Config] Failed to save configuration to NVS");
         sendError(request, 500, "Failed to save configuration");
     }
 }

@@ -410,7 +410,6 @@ bool MQTTClient::publishCANMessage(const CANMessage& msg) {
     // Build topic: <prefix>/canmsg
     char topic[64];
     snprintf(topic, sizeof(topic), "%s/canmsg", config.mqtt_topic_prefix);
-
     return publish(topic, payload.c_str(), false);
 }
 

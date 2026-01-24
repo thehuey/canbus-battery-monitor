@@ -206,7 +206,7 @@ void SettingsManager::setDefaults() {
     // CAN defaults
     settings.can_bitrate = CAN_BITRATE;
     settings.can_log_enabled = true;        // Local logging enabled by default
-    settings.mqtt_canmsg_enabled = false;   // MQTT CAN messages disabled by default
+    settings.mqtt_canmsg_enabled = true;    // MQTT CAN messages enabled by default
 
     // Timing defaults
     settings.publish_interval_ms = DEFAULT_PUBLISH_INTERVAL_MS;

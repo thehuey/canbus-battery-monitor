@@ -487,13 +487,11 @@ void networkTask(void* parameter) {
 
         // MQTT publishing (if connected)
         if (mqttClient.isConnected() && now - last_mqtt_publish > settings.publish_interval_ms) {
-            // Publish individual battery status
-            for (uint8_t i = 0; i < batteryManager.getActiveBatteryCount(); i++) {
-                mqttClient.publishBatteryStatus(i);
-            }
-
-            // Publish combined status
-            mqttClient.publishAllBatteries();
+            // Battery status publishing disabled - use canmsg topic instead
+            // for (uint8_t i = 0; i < batteryManager.getActiveBatteryCount(); i++) {
+            //     mqttClient.publishBatteryStatus(i);
+            // }
+            // mqttClient.publishAllBatteries();
 
             // Publish system status (every 5 publishes = every 5 seconds by default)
             static uint8_t publish_count = 0;
