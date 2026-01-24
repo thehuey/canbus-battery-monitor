@@ -587,3 +587,115 @@ body {
         --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
 }
+
+/* CAN Bus Monitor */
+.can-monitor {
+    margin: 1.5rem;
+    background: var(--bg-card);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.can-monitor-header {
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.can-monitor-header h2 {
+    font-size: 1.25rem;
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.can-monitor-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.can-monitor-controls .btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+}
+
+.filter-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.filter-input {
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    width: 100px;
+    font-family: 'Courier New', monospace;
+}
+
+.filter-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.can-monitor-body {
+    padding: 0;
+}
+
+#canLogViewer {
+    width: 100%;
+    height: 400px;
+    padding: 1rem;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: none;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    resize: vertical;
+    overflow-y: auto;
+}
+
+.can-monitor-footer {
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+    .can-monitor {
+        margin: 1rem 0.5rem;
+    }
+
+    .can-monitor-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .can-monitor-controls {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    #canLogViewer {
+        height: 300px;
+        font-size: 0.75rem;
+    }
+}

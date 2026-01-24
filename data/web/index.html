@@ -77,6 +77,29 @@
         <!-- Battery cards will be dynamically inserted here -->
       </div>
 
+      <!-- CAN Bus Monitor -->
+      <div class="can-monitor">
+        <div class="can-monitor-header">
+          <h2>CAN Bus Monitor</h2>
+          <div class="can-monitor-controls">
+            <button class="btn btn-sm" id="canPauseBtn">Pause</button>
+            <button class="btn btn-sm" id="canClearBtn">Clear</button>
+            <button class="btn btn-sm" id="canCopyBtn">Copy</button>
+            <label class="filter-label">
+              Filter ID:
+              <input type="text" id="canFilterInput" placeholder="0x123" class="filter-input" />
+            </label>
+          </div>
+        </div>
+        <div class="can-monitor-body">
+          <textarea id="canLogViewer" readonly></textarea>
+        </div>
+        <div class="can-monitor-footer">
+          <span id="canMessageCount">0 messages</span>
+          <span id="canPausedIndicator" style="display:none; color: #ff9800;">⏸ PAUSED</span>
+        </div>
+      </div>
+
       <!-- Settings Modal -->
       <div class="modal" id="settingsModal">
         <div class="modal-content">

@@ -248,6 +248,9 @@ void setupCANBus() {
     canDriver.setMessageCallback([](const CANMessage& msg) {
         const Settings& settings = settingsManager.getSettings();
 
+        // Broadcast to WebSocket clients for real-time viewing
+        webServer.broadcastCANMessage(msg.id, msg.dlc, msg.data);
+
         // Log to local storage if enabled
         if (settings.can_log_enabled) {
             canLogger.logMessage(msg);

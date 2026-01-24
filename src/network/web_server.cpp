@@ -442,17 +442,37 @@ void WebServer::handleDownloadCANLog(AsyncWebServerRequest* request) {
         return;
     }
 
+    LOG_INFO("[WebServer] CAN log download requested");
+    LOG_INFO("[WebServer] Total logged messages: %u, Dropped: %u",
+             can_logger_->getMessageCount(), can_logger_->getDroppedCount());
+
     // Flush any pending messages to file first
     can_logger_->flush();
 
-    // Serve the SPIFFS file directly
-    if (SPIFFS.exists("/canlog.csv")) {
-        AsyncWebServerResponse* response = request->beginResponse(SPIFFS, "/canlog.csv", "text/csv", true);
-        response->addHeader("Content-Disposition", "attachment; filename=\"canlog.csv\"");
-        request->send(response);
-    } else {
-        sendError(request, 404, "CAN log file not found");
+    // Check if file exists and get size
+    if (!SPIFFS.exists("/canlog.csv")) {
+        LOG_ERROR("[WebServer] CAN log file /canlog.csv not found on SPIFFS");
+        LOG_ERROR("[WebServer] Make sure can_log_enabled is true in settings");
+        sendError(request, 404, "CAN log file not found - check if CAN logging is enabled");
+        return;
     }
+
+    File file = SPIFFS.open("/canlog.csv", "r");
+    if (!file) {
+        LOG_ERROR("[WebServer] Failed to open /canlog.csv for reading");
+        sendError(request, 500, "Failed to open CAN log file");
+        return;
+    }
+
+    size_t fileSize = file.size();
+    file.close();
+
+    LOG_INFO("[WebServer] Serving CAN log file: %d bytes from SPIFFS", fileSize);
+
+    // Serve the SPIFFS file directly
+    AsyncWebServerResponse* response = request->beginResponse(SPIFFS, "/canlog.csv", "text/csv", true);
+    response->addHeader("Content-Disposition", "attachment; filename=\"canlog.csv\"");
+    request->send(response);
 }
 
 void WebServer::handleClearCANLog(AsyncWebServerRequest* request) {

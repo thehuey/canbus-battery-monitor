@@ -48,8 +48,8 @@ private:
     static constexpr size_t MEMORY_BUFFER_SIZE = 2000;
     RingBuffer<CANMessage, MEMORY_BUFFER_SIZE> memory_buffer;
 
-    // Write buffer for batching
-    static constexpr size_t WRITE_BUFFER_SIZE = 100;
+    // Write buffer for batching - increased to prevent dropped messages
+    static constexpr size_t WRITE_BUFFER_SIZE = 500;
     RingBuffer<CANMessage, WRITE_BUFFER_SIZE> write_buffer;
 
     // State

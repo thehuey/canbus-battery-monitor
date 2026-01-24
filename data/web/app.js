@@ -8,6 +8,14 @@ class BatteryMonitor {
     this.config = {};
     this.batteries = [];
 
+    // CAN monitor state
+    this.canMonitor = {
+      paused: false,
+      messageCount: 0,
+      maxMessages: 1000,
+      filter: null,
+    };
+
     this.init();
   }
 
@@ -73,6 +81,23 @@ class BatteryMonitor {
         this.clearWiFi();
       }
     });
+
+    // CAN Monitor controls
+    document.getElementById("canPauseBtn").addEventListener("click", () => {
+      this.toggleCANMonitorPause();
+    });
+
+    document.getElementById("canClearBtn").addEventListener("click", () => {
+      this.clearCANMonitor();
+    });
+
+    document.getElementById("canCopyBtn").addEventListener("click", () => {
+      this.copyCANMonitor();
+    });
+
+    document.getElementById("canFilterInput").addEventListener("input", (e) => {
+      this.setCANFilter(e.target.value.trim());
+    });
   }
 
   // WebSocket Management
@@ -122,7 +147,7 @@ class BatteryMonitor {
           this.updateSystemStatus(message.data);
           break;
         case "can_message":
-          // Could display CAN messages in real-time if needed
+          this.handleCANMessage(message);
           break;
         default:
           // Handle initial status message (no type field)
@@ -619,6 +644,92 @@ class BatteryMonitor {
       "'": "&#039;",
     };
     return text.replace(/[&<>"']/g, (m) => map[m]);
+  }
+
+  // CAN Monitor Methods
+  handleCANMessage(message) {
+    if (this.canMonitor.paused) return;
+
+    // Apply filter if set
+    if (this.canMonitor.filter) {
+      const msgId = message.id.toLowerCase();
+      const filter = this.canMonitor.filter.toLowerCase();
+      if (!msgId.includes(filter)) return;
+    }
+
+    const viewer = document.getElementById("canLogViewer");
+    if (!viewer) return;
+
+    // Format timestamp
+    const now = new Date();
+    const timestamp = now.toLocaleTimeString() + "." + now.getMilliseconds().toString().padStart(3, "0");
+
+    // Format message line
+    const line = `[${timestamp}] ID:${message.id} DLC:${message.dlc} Data:${message.data}\n`;
+
+    // Append to viewer
+    viewer.value += line;
+
+    // Update counter
+    this.canMonitor.messageCount++;
+    document.getElementById("canMessageCount").textContent = `${this.canMonitor.messageCount} messages`;
+
+    // Limit total lines to prevent memory issues
+    const lines = viewer.value.split("\n");
+    if (lines.length > this.canMonitor.maxMessages) {
+      viewer.value = lines.slice(lines.length - this.canMonitor.maxMessages).join("\n");
+    }
+
+    // Auto-scroll to bottom
+    viewer.scrollTop = viewer.scrollHeight;
+  }
+
+  toggleCANMonitorPause() {
+    this.canMonitor.paused = !this.canMonitor.paused;
+    const btn = document.getElementById("canPauseBtn");
+    const indicator = document.getElementById("canPausedIndicator");
+
+    if (this.canMonitor.paused) {
+      btn.textContent = "Resume";
+      btn.style.background = "#f59e0b";
+      indicator.style.display = "inline";
+    } else {
+      btn.textContent = "Pause";
+      btn.style.background = "";
+      indicator.style.display = "none";
+    }
+  }
+
+  clearCANMonitor() {
+    document.getElementById("canLogViewer").value = "";
+    this.canMonitor.messageCount = 0;
+    document.getElementById("canMessageCount").textContent = "0 messages";
+    this.showToast("CAN monitor cleared", "success");
+  }
+
+  copyCANMonitor() {
+    const viewer = document.getElementById("canLogViewer");
+    if (!viewer.value) {
+      this.showToast("Nothing to copy", "warning");
+      return;
+    }
+
+    navigator.clipboard.writeText(viewer.value)
+      .then(() => {
+        this.showToast("Copied to clipboard!", "success");
+      })
+      .catch(() => {
+        // Fallback for older browsers
+        viewer.select();
+        document.execCommand("copy");
+        this.showToast("Copied to clipboard!", "success");
+      });
+  }
+
+  setCANFilter(value) {
+    this.canMonitor.filter = value || null;
+    const filterText = value ? ` (filtered by ${value})` : "";
+    console.log(`CAN filter ${value ? "set to: " + value : "cleared"}`);
   }
 }
 
