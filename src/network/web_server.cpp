@@ -792,9 +792,17 @@ void WebServer::broadcastLog(const LogEntry& entry) {
 void WebServer::sendLogHistory(AsyncWebSocketClient* client) {
     if (client == nullptr) return;
 
-    // Get recent logs from buffer
-    LogEntry* logs = new LogEntry[LOG_BUFFER_SIZE];
-    size_t count = remoteLog.getRecentLogs(logs, LOG_BUFFER_SIZE);
+    // Limit the number of log entries to prevent memory allocation failures
+    // Each entry can have 128+ bytes of message, so keep this small
+    constexpr size_t MAX_HISTORY_ENTRIES = 20;
+
+    LogEntry* logs = new (std::nothrow) LogEntry[MAX_HISTORY_ENTRIES];
+    if (logs == nullptr) {
+        LOG_WARN("[WebSocket] Failed to allocate log history buffer");
+        return;
+    }
+
+    size_t count = remoteLog.getRecentLogs(logs, MAX_HISTORY_ENTRIES);
 
     if (count > 0) {
         // Send as a batch message
@@ -811,7 +819,13 @@ void WebServer::sendLogHistory(AsyncWebSocketClient* client) {
 
         String json;
         serializeJson(doc, json);
-        client->text(json);
+
+        // Check if the message is too large before sending
+        if (json.length() < 8192) {  // Limit to 8KB
+            client->text(json);
+        } else {
+            LOG_WARN("[WebSocket] Log history too large (%d bytes), skipping", json.length());
+        }
     }
 
     delete[] logs;
