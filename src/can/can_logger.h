@@ -45,7 +45,7 @@ private:
     bool checkAndRotate();  // Check if rotation is needed
 
     // In-memory buffer for recent messages
-    static constexpr size_t MEMORY_BUFFER_SIZE = 1000;
+    static constexpr size_t MEMORY_BUFFER_SIZE = 2000;
     RingBuffer<CANMessage, MEMORY_BUFFER_SIZE> memory_buffer;
 
     // Write buffer for batching

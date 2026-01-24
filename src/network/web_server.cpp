@@ -363,18 +363,36 @@ void WebServer::handleGetCANLog(AsyncWebServerRequest* request) {
         has_filter = true;
     }
 
-    // Limit parameter
-    size_t limit = 100;
+    // Limit parameter - default to 1000 for safe memory allocation
+    size_t limit = 1000;
     if (request->hasParam("limit")) {
         int l = request->getParam("limit")->value().toInt();
-        if (l > 0 && l <= 1000) limit = l;
+        if (l > 0 && l <= 2000) limit = l;
     }
 
     JsonArray messages = doc["messages"].to<JsonArray>();
 
     if (can_logger_ != nullptr) {
-        // Allocate buffer for messages
-        CANMessage* buffer = new CANMessage[limit];
+        // Check available heap before allocation
+        size_t required_memory = limit * sizeof(CANMessage);
+        size_t free_heap = ESP.getFreeHeap();
+
+        if (required_memory > free_heap / 2) {
+            // Not enough heap, reduce limit
+            limit = (free_heap / 2) / sizeof(CANMessage);
+            if (limit < 100) limit = 100;  // Minimum 100 messages
+            LOG_WARN("[WebServer] Reducing CAN log limit to %d due to low heap (%d bytes free)",
+                     limit, free_heap);
+        }
+
+        // Allocate buffer for messages with error handling
+        CANMessage* buffer = new (std::nothrow) CANMessage[limit];
+        if (buffer == nullptr) {
+            LOG_ERROR("[WebServer] Failed to allocate buffer for CAN log (%d bytes)", required_memory);
+            sendError(request, 500, "Not enough memory to retrieve CAN log");
+            return;
+        }
+
         size_t count = 0;
 
         bool success;
@@ -424,39 +442,17 @@ void WebServer::handleDownloadCANLog(AsyncWebServerRequest* request) {
         return;
     }
 
-    // Build CSV from recent messages
-    String csv = "timestamp,id,dlc,data,extended,rtr\n";
+    // Flush any pending messages to file first
+    can_logger_->flush();
 
-    // Get up to 1000 recent messages
-    const size_t max_msgs = 1000;
-    CANMessage* buffer = new CANMessage[max_msgs];
-    size_t count = 0;
-
-    if (can_logger_->getRecentMessages(buffer, count, max_msgs)) {
-        for (size_t i = 0; i < count; i++) {
-            const CANMessage& msg = buffer[i];
-            char line[128];
-
-            // Format data as hex string
-            char data_hex[24] = "";
-            for (int j = 0; j < msg.dlc; j++) {
-                char byte_hex[3];
-                snprintf(byte_hex, sizeof(byte_hex), "%02X", msg.data[j]);
-                strcat(data_hex, byte_hex);
-            }
-
-            snprintf(line, sizeof(line), "%u,0x%03X,%d,%s,%d,%d\n",
-                     (unsigned int)msg.timestamp, msg.id, msg.dlc, data_hex,
-                     msg.extended ? 1 : 0, msg.rtr ? 1 : 0);
-            csv += line;
-        }
+    // Serve the SPIFFS file directly
+    if (SPIFFS.exists("/canlog.csv")) {
+        AsyncWebServerResponse* response = request->beginResponse(SPIFFS, "/canlog.csv", "text/csv", true);
+        response->addHeader("Content-Disposition", "attachment; filename=\"canlog.csv\"");
+        request->send(response);
+    } else {
+        sendError(request, 404, "CAN log file not found");
     }
-
-    delete[] buffer;
-
-    AsyncWebServerResponse* response = request->beginResponse(200, "text/csv", csv);
-    response->addHeader("Content-Disposition", "attachment; filename=\"canlog.csv\"");
-    request->send(response);
 }
 
 void WebServer::handleClearCANLog(AsyncWebServerRequest* request) {
