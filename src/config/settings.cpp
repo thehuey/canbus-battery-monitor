@@ -197,6 +197,7 @@ void SettingsManager::setDefaults() {
     // Network defaults
     strlcpy(settings.wifi_ssid, "", sizeof(settings.wifi_ssid));
     strlcpy(settings.wifi_password, "", sizeof(settings.wifi_password));
+    settings.mqtt_enabled = false;  // MQTT disabled by default
     strlcpy(settings.mqtt_broker, MQTT_DEFAULT_BROKER, sizeof(settings.mqtt_broker));
     settings.mqtt_port = MQTT_DEFAULT_PORT;
     strlcpy(settings.mqtt_topic_prefix, MQTT_TOPIC_PREFIX, sizeof(settings.mqtt_topic_prefix));

@@ -27,6 +27,28 @@ class BatteryMonitor {
   }
 
   setupEventListeners() {
+    // Close WebSocket when page is hidden or closed
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        console.log("Page hidden, closing WebSocket");
+        if (this.ws) {
+          this.ws.close();
+        }
+        this.clearReconnectInterval();
+      } else {
+        console.log("Page visible, reconnecting WebSocket");
+        this.connectWebSocket();
+      }
+    });
+
+    // Close WebSocket on page unload
+    window.addEventListener("beforeunload", () => {
+      if (this.ws) {
+        this.ws.close();
+      }
+      this.clearReconnectInterval();
+    });
+
     // Settings button
     document.getElementById("settingsBtn").addEventListener("click", () => {
       this.showModal();
@@ -102,13 +124,28 @@ class BatteryMonitor {
 
   // WebSocket Management
   connectWebSocket() {
+    // Prevent multiple simultaneous connection attempts
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      console.log("WebSocket already connecting or connected, skipping");
+      return;
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/ws`;
 
     console.log("Connecting to WebSocket:", wsUrl);
 
     try {
+      // Close existing connection if any
+      if (this.ws) {
+        this.ws.close();
+        this.ws = null;
+      }
+
       this.ws = new WebSocket(wsUrl);
+
+      // Set binary type to arraybuffer (not blob) for efficient binary handling
+      this.ws.binaryType = 'arraybuffer';
 
       this.ws.onopen = () => {
         console.log("WebSocket connected");
@@ -117,7 +154,24 @@ class BatteryMonitor {
       };
 
       this.ws.onmessage = (event) => {
-        this.handleWebSocketMessage(event.data);
+        // Debug: log the type of data received
+        // console.log("WebSocket received data type:", typeof event.data, event.data.constructor.name);
+
+        // Handle both binary and text messages
+        if (event.data instanceof ArrayBuffer) {
+          // console.log("Processing as ArrayBuffer, size:", event.data.byteLength);
+          this.handleBinaryMessage(event.data);
+        } else if (event.data instanceof Blob) {
+          // console.log("Processing as Blob, size:", event.data.size);
+          // Convert Blob to ArrayBuffer
+          event.data.arrayBuffer().then((buffer) => {
+            this.handleBinaryMessage(buffer);
+          });
+        } else {
+          // console.log("Processing as text/JSON");
+          // Text message (JSON)
+          this.handleWebSocketMessage(event.data);
+        }
       };
 
       this.ws.onerror = (error) => {
@@ -137,7 +191,18 @@ class BatteryMonitor {
 
   handleWebSocketMessage(data) {
     try {
+      // Safety check: if this is somehow a Blob or ArrayBuffer, reject it
+      if (data instanceof Blob || data instanceof ArrayBuffer) {
+        console.error("Binary data incorrectly routed to JSON handler");
+        return;
+      }
+
       const message = JSON.parse(data);
+
+      // Only log non-log messages to avoid spam (logs go to /logs page)
+      if (message.type !== "log" && message.type !== "log_history") {
+        console.log("WebSocket message:", message.type, message);
+      }
 
       switch (message.type) {
         case "battery_update":
@@ -148,6 +213,10 @@ class BatteryMonitor {
           break;
         case "can_message":
           this.handleCANMessage(message);
+          break;
+        case "log":
+        case "log_history":
+          // Ignore - these are for the /logs page
           break;
         default:
           // Handle initial status message (no type field)
@@ -163,17 +232,97 @@ class BatteryMonitor {
     }
   }
 
-  scheduleReconnect() {
-    if (this.reconnectInterval) return;
+  handleBinaryMessage(buffer) {
+    try {
+      const view = new DataView(buffer);
+      let offset = 0;
 
+      if (buffer.byteLength < 2) {
+        console.error("Binary message too short:", buffer.byteLength);
+        return;
+      }
+
+      const type = view.getUint8(offset++);
+
+      if (type === 0x01) {
+        // Single CAN message (legacy format)
+        if (buffer.byteLength < 10) return;
+
+        const id = view.getUint32(offset, true);
+        offset += 4;
+        const dlc = view.getUint8(offset++);
+        if (dlc > 8 || buffer.byteLength < offset + dlc + 4) return;
+
+        const data = new Uint8Array(buffer, offset, dlc);
+        offset += dlc;
+        const timestamp = view.getUint32(offset, true);
+
+        const idHex = "0x" + id.toString(16).toUpperCase().padStart(3, "0");
+        const dataHex = Array.from(data)
+          .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
+          .join("");
+
+        this.handleCANMessage({
+          type: "can_message",
+          id: idHex,
+          dlc: dlc,
+          data: dataHex,
+          timestamp: timestamp,
+        });
+      } else if (type === 0x02) {
+        // Batch CAN messages
+        const count = view.getUint8(offset++);
+
+        for (let i = 0; i < count; i++) {
+          if (offset + 5 > buffer.byteLength) break;
+
+          const id = view.getUint32(offset, true);
+          offset += 4;
+          const dlc = view.getUint8(offset++);
+          if (dlc > 8 || offset + dlc + 4 > buffer.byteLength) break;
+
+          const data = new Uint8Array(buffer, offset, dlc);
+          offset += dlc;
+          const timestamp = view.getUint32(offset, true);
+          offset += 4;
+
+          const idHex = "0x" + id.toString(16).toUpperCase().padStart(3, "0");
+          const dataHex = Array.from(data)
+            .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
+            .join("");
+
+          this.handleCANMessage({
+            type: "can_message",
+            id: idHex,
+            dlc: dlc,
+            data: dataHex,
+            timestamp: timestamp,
+          });
+        }
+      } else {
+        console.warn("Unknown binary message type:", type);
+      }
+    } catch (error) {
+      console.error("Error parsing binary message:", error);
+    }
+  }
+
+  scheduleReconnect() {
+    if (this.reconnectInterval) {
+      console.log("Reconnect already scheduled");
+      return;
+    }
+
+    console.log("Scheduling reconnect in 1 second...");
     this.reconnectInterval = setInterval(() => {
       console.log("Attempting to reconnect...");
       this.connectWebSocket();
-    }, 5000);
+    }, 1000);
   }
 
   clearReconnectInterval() {
     if (this.reconnectInterval) {
+      console.log("Clearing reconnect interval");
       clearInterval(this.reconnectInterval);
       this.reconnectInterval = null;
     }
@@ -395,6 +544,7 @@ class BatteryMonitor {
     document.getElementById("wifiSSID").value = this.config.wifi_ssid || "";
 
     // MQTT
+    document.getElementById("mqttEnabled").checked = this.config.mqtt_enabled !== false;
     document.getElementById("mqttBroker").value = this.config.mqtt_broker || "";
     document.getElementById("mqttPort").value = this.config.mqtt_port || 1883;
     document.getElementById("mqttUsername").value =
@@ -462,6 +612,7 @@ class BatteryMonitor {
 
   async saveMQTTConfig() {
     const config = {
+      mqtt_enabled: document.getElementById("mqttEnabled").checked,
       mqtt_broker: document.getElementById("mqttBroker").value.trim(),
       mqtt_port: parseInt(document.getElementById("mqttPort").value) || 1883,
       mqtt_username: document.getElementById("mqttUsername").value.trim(),
@@ -648,6 +799,7 @@ class BatteryMonitor {
 
   // CAN Monitor Methods
   handleCANMessage(message) {
+    // console.log("CAN message received:", message);
     if (this.canMonitor.paused) return;
 
     // Apply filter if set
@@ -672,7 +824,7 @@ class BatteryMonitor {
 
     // Update counter
     this.canMonitor.messageCount++;
-    document.getElementById("canMessageCount").textContent = `${this.canMonitor.messageCount} messages`;
+    document.getElementById("canMessageCount").textContent = this.formatNumber(this.canMonitor.messageCount);
 
     // Limit total lines to prevent memory issues
     const lines = viewer.value.split("\n");
@@ -703,7 +855,7 @@ class BatteryMonitor {
   clearCANMonitor() {
     document.getElementById("canLogViewer").value = "";
     this.canMonitor.messageCount = 0;
-    document.getElementById("canMessageCount").textContent = "0 messages";
+    document.getElementById("canMessageCount").textContent = "0";
     this.showToast("CAN monitor cleared", "success");
   }
 

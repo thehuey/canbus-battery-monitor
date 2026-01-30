@@ -277,6 +277,11 @@ pio pkg install --platform espressif32
 
 **"Serial port not found"**
 
+- If using Docker Dev Containers run
+  ```
+  usbipd attach -a -w -b 1-7
+  ```
+  to attach the USB device to the docker host
 - Check USB cable supports data (not just charging)
 - Install USB-to-Serial drivers (CP2102, CH340, or FTDI)
 - Try different USB port

@@ -31,6 +31,7 @@ struct Settings {
     // Network Configuration
     char wifi_ssid[32];
     char wifi_password[64];
+    bool mqtt_enabled;              // Enable/disable MQTT (default: false)
     char mqtt_broker[64];
     uint16_t mqtt_port;
     char mqtt_topic_prefix[32];

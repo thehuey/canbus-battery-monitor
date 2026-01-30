@@ -117,6 +117,9 @@ void loop() {
     // Main loop runs on core 1
     // Most work is done in FreeRTOS tasks
 
+    // WebSocket maintenance (cleanup and keepalive)
+    webServer.loop();
+
     // Check for serial commands
     static String serialCommand = "";
     while (Serial.available()) {

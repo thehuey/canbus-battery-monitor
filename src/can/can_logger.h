@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 #include <SPIFFS.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "can_message.h"
 #include "../utils/ring_buffer.h"
 
@@ -63,6 +65,9 @@ private:
     // Configuration
     bool auto_flush;
     uint32_t flush_interval_ms;
+
+    // Thread safety
+    SemaphoreHandle_t mutex_;
 
     // Helper functions
     void formatMessageCSV(const CANMessage& msg, char* buffer, size_t size);

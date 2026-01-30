@@ -10,6 +10,41 @@
 // Global instance
 WebServer webServer;
 
+// Persistent buffer pool for CAN log API - allocated once, reused forever
+// Protected by mutex for thread safety
+namespace {
+    constexpr size_t CAN_LOG_BUFFER_SIZE = 200;
+    CANMessage* persistent_can_buffer = nullptr;
+    SemaphoreHandle_t can_buffer_mutex = nullptr;
+
+    void initCANLogBuffer() {
+        if (can_buffer_mutex == nullptr) {
+            can_buffer_mutex = xSemaphoreCreateMutex();
+        }
+        // Allocate buffer once on first init (freed never - persistent for lifetime)
+        if (persistent_can_buffer == nullptr) {
+            persistent_can_buffer = new CANMessage[CAN_LOG_BUFFER_SIZE];
+            if (persistent_can_buffer) {
+                LOG_INFO("[WebServer] Persistent CAN buffer allocated: %d messages (%d bytes)",
+                         CAN_LOG_BUFFER_SIZE, CAN_LOG_BUFFER_SIZE * sizeof(CANMessage));
+            } else {
+                LOG_ERROR("[WebServer] Failed to allocate persistent CAN buffer!");
+            }
+        }
+    }
+
+    bool acquireCANBuffer() {
+        if (can_buffer_mutex == nullptr || persistent_can_buffer == nullptr) return false;
+        return xSemaphoreTake(can_buffer_mutex, pdMS_TO_TICKS(100)) == pdTRUE;
+    }
+
+    void releaseCANBuffer() {
+        if (can_buffer_mutex != nullptr) {
+            xSemaphoreGive(can_buffer_mutex);
+        }
+    }
+}
+
 WebServer::WebServer(uint16_t port)
     : server_(port)
     , ws_("/ws")
@@ -19,7 +54,11 @@ WebServer::WebServer(uint16_t port)
     , can_logger_(nullptr)
     , client_callback_(nullptr)
     , request_count_(0)
-    , ws_messages_sent_(0) {
+    , ws_messages_sent_(0)
+    , last_ws_cleanup_(0)
+    , can_batch_count_(0)
+    , last_can_flush_(0) {
+    portMUX_INITIALIZE(&can_batch_mux_);
 }
 
 WebServer::~WebServer() {
@@ -35,9 +74,18 @@ bool WebServer::begin(SettingsManager* settings, BatteryManager* batteries, CANL
 
     LOG_INFO("[WebServer] Starting on port %d",port_);
 
+    // Initialize static CAN buffer pool
+    initCANLogBuffer();
+    LOG_INFO("[WebServer] Static CAN buffer pool initialized (%d messages)", CAN_LOG_BUFFER_SIZE);
+
     // Initialize SPIFFS for static files
     if (!SPIFFS.begin(true)) {
-        LOG_INFO("[WebServer] Warning: SPIFFS mount failed, no static files will be served");
+        LOG_ERROR("[WebServer] SPIFFS mount failed, no static files will be served");
+    } else {
+        LOG_INFO("[WebServer] SPIFFS mounted successfully");
+        LOG_INFO("[WebServer] Total: %d bytes, Used: %d bytes, Free: %d bytes",
+                 SPIFFS.totalBytes(), SPIFFS.usedBytes(),
+                 SPIFFS.totalBytes() - SPIFFS.usedBytes());
     }
 
     // Setup handlers
@@ -69,13 +117,35 @@ void WebServer::setupWebSocket() {
 }
 
 void WebServer::setupStaticFiles() {
+    // Log SPIFFS contents for debugging
+    LOG_INFO("[WebServer] Checking SPIFFS filesystem contents:");
+    File root = SPIFFS.open("/");
+    if (root && root.isDirectory()) {
+        File file = root.openNextFile();
+        while (file) {
+            LOG_INFO("[WebServer]   Found: %s (%d bytes)", file.name(), file.size());
+            file = root.openNextFile();
+        }
+    } else {
+        LOG_WARN("[WebServer] Failed to open SPIFFS root directory");
+    }
+
     // Serve index.html at root
     server_.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+        LOG_INFO("[WebServer] GET / from %s", request->client()->remoteIP().toString().c_str());
+
         if (SPIFFS.exists("/web/index.html")) {
-            request->send(SPIFFS, "/web/index.html", "text/html");
+            LOG_INFO("[WebServer] Serving /web/index.html");
+            AsyncWebServerResponse* response = request->beginResponse(SPIFFS, "/web/index.html", "text/html");
+            response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            request->send(response);
         } else if (SPIFFS.exists("/index.html")) {
-            request->send(SPIFFS, "/index.html", "text/html");
+            LOG_INFO("[WebServer] Serving /index.html");
+            AsyncWebServerResponse* response = request->beginResponse(SPIFFS, "/index.html", "text/html");
+            response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            request->send(response);
         } else {
+            LOG_WARN("[WebServer] No index.html found, serving fallback page");
             // Fallback inline minimal page
             String html = "<!DOCTYPE html><html><head><title>eBike Monitor</title></head>"
                          "<body><h1>eBike Battery Monitor</h1>"
@@ -212,11 +282,14 @@ void WebServer::setupStaticFiles() {
         request->send(200, "text/html", html);
     });
 
-    // Serve static files from SPIFFS /web directory
-    server_.serveStatic("/", SPIFFS, "/web/").setDefaultFile("index.html");
+    // Serve specific static files (JS, CSS, etc.) from /web directory
+    server_.serveStatic("/app.js", SPIFFS, "/web/app.js");
+    server_.serveStatic("/style.css", SPIFFS, "/web/style.css");
 
-    // Also try root of SPIFFS for simpler setups
+    // Serve all files from /static/ path for debugging
     server_.serveStatic("/static/", SPIFFS, "/");
+
+    LOG_INFO("[WebServer] Static file handlers registered");
 }
 
 void WebServer::setupAPIEndpoints() {
@@ -352,88 +425,138 @@ void WebServer::handleGetBattery(AsyncWebServerRequest* request, uint8_t id) {
 }
 
 void WebServer::handleGetCANLog(AsyncWebServerRequest* request) {
-    JsonDocument doc;
+    if (can_logger_ == nullptr) {
+        sendError(request, 500, "CAN logger not available");
+        return;
+    }
 
-    // Check for filter parameter
+    // Try to acquire static buffer - fast path with no allocations
+    if (!acquireCANBuffer()) {
+        sendError(request, 503, "CAN log busy - try again");
+        return;
+    }
+
+    // Parse parameters (avoid String operations)
     uint32_t filter_id = 0;
     bool has_filter = false;
     if (request->hasParam("filter")) {
-        String filter = request->getParam("filter")->value();
-        filter_id = strtoul(filter.c_str(), nullptr, 0);  // Auto-detect hex or dec
+        const char* filter_str = request->getParam("filter")->value().c_str();
+        filter_id = strtoul(filter_str, nullptr, 0);
         has_filter = true;
     }
 
-    // Limit parameter - default to 1000 for safe memory allocation
-    size_t limit = 1000;
+    size_t limit = CAN_LOG_BUFFER_SIZE;  // Use full buffer by default
     if (request->hasParam("limit")) {
         int l = request->getParam("limit")->value().toInt();
-        if (l > 0 && l <= 2000) limit = l;
+        if (l > 0 && l <= CAN_LOG_BUFFER_SIZE) limit = l;
     }
 
-    JsonArray messages = doc["messages"].to<JsonArray>();
+    // Use persistent buffer - allocated once, reused forever!
+    size_t count = 0;
+    bool success;
 
-    if (can_logger_ != nullptr) {
-        // Check available heap before allocation
-        size_t required_memory = limit * sizeof(CANMessage);
-        size_t free_heap = ESP.getFreeHeap();
+    if (has_filter) {
+        success = can_logger_->getFilteredMessages(persistent_can_buffer, count, limit, filter_id);
+    } else {
+        success = can_logger_->getRecentMessages(persistent_can_buffer, count, limit);
+    }
 
-        if (required_memory > free_heap / 2) {
-            // Not enough heap, reduce limit
-            limit = (free_heap / 2) / sizeof(CANMessage);
-            if (limit < 100) limit = 100;  // Minimum 100 messages
-            LOG_WARN("[WebServer] Reducing CAN log limit to %d due to low heap (%d bytes free)",
-                     limit, free_heap);
+    if (!success) {
+        releaseCANBuffer();
+        sendError(request, 500, "Failed to retrieve messages");
+        return;
+    }
+
+    // Use AsyncResponseStream for efficient streaming
+    AsyncResponseStream* response = request->beginResponseStream("application/json");
+    response->addHeader("Access-Control-Allow-Origin", "*");
+
+    // Pre-allocate write buffer on stack for batching writes
+    char write_buffer[512];
+    size_t write_pos = 0;
+
+    // Helper to flush write buffer
+    auto flush = [&]() {
+        if (write_pos > 0) {
+            response->write((uint8_t*)write_buffer, write_pos);
+            write_pos = 0;
         }
+    };
 
-        // Allocate buffer for messages with error handling
-        CANMessage* buffer = new (std::nothrow) CANMessage[limit];
-        if (buffer == nullptr) {
-            LOG_ERROR("[WebServer] Failed to allocate buffer for CAN log (%d bytes)", required_memory);
-            sendError(request, 500, "Not enough memory to retrieve CAN log");
-            return;
+    // Helper to append to write buffer with auto-flush
+    auto append = [&](const char* str, size_t len) {
+        if (write_pos + len >= sizeof(write_buffer)) {
+            flush();
         }
-
-        size_t count = 0;
-
-        bool success;
-        if (has_filter) {
-            success = can_logger_->getFilteredMessages(buffer, count, limit, filter_id);
+        if (len < sizeof(write_buffer)) {
+            memcpy(write_buffer + write_pos, str, len);
+            write_pos += len;
         } else {
-            success = can_logger_->getRecentMessages(buffer, count, limit);
+            // String too large, write directly
+            flush();
+            response->write((uint8_t*)str, len);
+        }
+    };
+
+    // Start JSON header
+    const char* header = "{\"messages\":[";
+    append(header, strlen(header));
+
+    // Stream messages with zero-copy approach
+    for (size_t i = 0; i < count; i++) {
+        const CANMessage& msg = persistent_can_buffer[i];
+
+        // Build JSON on stack
+        char json_buf[128];
+        char hex_data[17];
+
+        // Format hex data efficiently
+        char* hex_ptr = hex_data;
+        for (int j = 0; j < msg.dlc && j < 8; j++) {
+            uint8_t byte = msg.data[j];
+            *hex_ptr++ = "0123456789ABCDEF"[byte >> 4];
+            *hex_ptr++ = "0123456789ABCDEF"[byte & 0x0F];
+        }
+        *hex_ptr = '\0';
+
+        // Format JSON message
+        int len = snprintf(json_buf, sizeof(json_buf),
+            "%s{\"id\":\"0x%03X\",\"dlc\":%u,\"data\":\"%s\",\"timestamp\":%lu,\"extended\":%s}",
+            (i > 0 ? "," : ""),
+            msg.id, msg.dlc, hex_data, msg.timestamp,
+            msg.extended ? "true" : "false");
+
+        if (len > 0 && len < (int)sizeof(json_buf)) {
+            append(json_buf, len);
         }
 
-        if (success) {
-            for (size_t i = 0; i < count; i++) {
-                const CANMessage& msg = buffer[i];
-                JsonObject obj = messages.add<JsonObject>();
-
-                char id_str[12];
-                snprintf(id_str, sizeof(id_str), "0x%03X", msg.id);
-                obj["id"] = id_str;
-                obj["dlc"] = msg.dlc;
-
-                String hex = "";
-                for (int j = 0; j < msg.dlc; j++) {
-                    char byte_hex[3];
-                    snprintf(byte_hex, sizeof(byte_hex), "%02X", msg.data[j]);
-                    hex += byte_hex;
-                }
-                obj["data"] = hex;
-                obj["timestamp"] = msg.timestamp;
-                obj["extended"] = msg.extended;
-            }
+        // Yield every 100 messages to prevent watchdog
+        if (i % 100 == 0) {
+            flush();
+            yield();
         }
-
-        delete[] buffer;
     }
 
-    doc["count"] = messages.size();
-    if (can_logger_ != nullptr) {
-        doc["total_logged"] = can_logger_->getMessageCount();
-        doc["dropped"] = can_logger_->getDroppedCount();
+    // Write footer
+    char footer[128];
+    int footer_len = snprintf(footer, sizeof(footer),
+        "],\"count\":%u,\"total_logged\":%u,\"dropped\":%u}",
+        count,
+        can_logger_->getMessageCount(),
+        can_logger_->getDroppedCount());
+
+    if (footer_len > 0 && footer_len < (int)sizeof(footer)) {
+        append(footer, footer_len);
     }
 
-    sendJSON(request, doc);
+    // Final flush
+    flush();
+
+    // Release buffer ASAP
+    releaseCANBuffer();
+
+    // Send response
+    request->send(response);
 }
 
 void WebServer::handleDownloadCANLog(AsyncWebServerRequest* request) {
@@ -514,6 +637,9 @@ void WebServer::handlePostConfig(AsyncWebServerRequest* request, uint8_t* data, 
     }
     if (!doc["wifi_password"].isNull()) {
         strlcpy(settings.wifi_password, doc["wifi_password"] | "", sizeof(settings.wifi_password));
+    }
+    if (!doc["mqtt_enabled"].isNull()) {
+        settings.mqtt_enabled = doc["mqtt_enabled"].as<bool>();
     }
     if (!doc["mqtt_broker"].isNull()) {
         strlcpy(settings.mqtt_broker, doc["mqtt_broker"] | "", sizeof(settings.mqtt_broker));
@@ -687,21 +813,41 @@ void WebServer::onWSEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                           AwsEventType type, void* arg, uint8_t* data, size_t len) {
     switch (type) {
         case WS_EVT_CONNECT:
-            LOG_DEBUG("[WebSocket] Client #%u connected from %s\n",
-                         client->id(), client->remoteIP().toString().c_str());
-            if (client_callback_) {
-                client_callback_(client->id(), true);
-            }
-            // Send initial status to new client
             {
-                JsonDocument doc;
-                buildStatusJSON(doc.to<JsonObject>());
-                String json;
-                serializeJson(doc, json);
-                client->text(json);
+                size_t free_heap = ESP.getFreeHeap();
+                LOG_INFO("[WebSocket] Client #%u connected from %s (heap: %u bytes)",
+                         client->id(), client->remoteIP().toString().c_str(), free_heap);
+
+                // Limit maximum clients to prevent memory exhaustion
+                if (ws_.count() > 5) {
+                    LOG_ERROR("[WebSocket] Rejecting client - too many connections (%u active)", ws_.count());
+                    client->text("{\"error\":\"Server full, max 5 clients\"}");
+                    client->close();
+                    return;
+                }
+
+                // Check if we have enough memory for this client
+                if (free_heap < 20000) {
+                    LOG_ERROR("[WebSocket] Rejecting client - insufficient heap (%u bytes)", free_heap);
+                    client->text("{\"error\":\"Server low on memory\"}");
+                    client->close();
+                    return;
+                }
+
+                if (client_callback_) {
+                    client_callback_(client->id(), true);
+                }
+                // Send initial status to new client
+                {
+                    JsonDocument doc;
+                    buildStatusJSON(doc.to<JsonObject>());
+                    String json;
+                    serializeJson(doc, json);
+                    client->text(json);
+                }
+                // Send log history to new client
+                sendLogHistory(client);
             }
-            // Send log history to new client
-            sendLogHistory(client);
             break;
 
         case WS_EVT_DISCONNECT:
@@ -747,26 +893,81 @@ void WebServer::broadcastBatteryUpdate() {
 void WebServer::broadcastCANMessage(uint32_t id, uint8_t dlc, const uint8_t* data) {
     if (ws_.count() == 0) return;
 
-    JsonDocument doc;
-    doc["type"] = "can_message";
-
-    char id_str[12];
-    snprintf(id_str, sizeof(id_str), "0x%03X", id);
-    doc["id"] = id_str;
-    doc["dlc"] = dlc;
-
-    String hex = "";
-    for (int i = 0; i < dlc; i++) {
-        char byte_hex[3];
-        snprintf(byte_hex, sizeof(byte_hex), "%02X", data[i]);
-        hex += byte_hex;
+    // Buffer the message for batch sending (flushed in loop() every 100ms)
+    // This prevents WebSocket queue overflow when many CAN messages arrive
+    // in a short burst, which causes the library to disconnect clients.
+    portENTER_CRITICAL(&can_batch_mux_);
+    if (can_batch_count_ < CAN_BATCH_MAX) {
+        CANBatchEntry& entry = can_batch_[can_batch_count_++];
+        entry.id = id;
+        entry.dlc = dlc > 8 ? 8 : dlc;
+        memcpy(entry.data, data, entry.dlc);
+        entry.timestamp = millis();
     }
-    doc["data"] = hex;
-    doc["timestamp"] = millis();
+    portEXIT_CRITICAL(&can_batch_mux_);
+}
 
-    String json;
-    serializeJson(doc, json);
-    ws_.textAll(json);
+void WebServer::flushCANBatch() {
+    if (can_batch_count_ == 0 || ws_.count() == 0) return;
+
+    if (ESP.getFreeHeap() < 10000) {
+        // Drop batch under low memory
+        portENTER_CRITICAL(&can_batch_mux_);
+        can_batch_count_ = 0;
+        portEXIT_CRITICAL(&can_batch_mux_);
+        return;
+    }
+
+    // Copy batch under lock, then release immediately
+    CANBatchEntry local_batch[CAN_BATCH_MAX];
+    size_t count;
+
+    portENTER_CRITICAL(&can_batch_mux_);
+    count = can_batch_count_;
+    if (count > 0) {
+        memcpy(local_batch, (const void*)can_batch_, count * sizeof(CANBatchEntry));
+        can_batch_count_ = 0;
+    }
+    portEXIT_CRITICAL(&can_batch_mux_);
+
+    if (count == 0) return;
+
+    // Calculate exact buffer size
+    // Format: [type:1=0x02][count:1][entries...]
+    // Each entry: [id:4][dlc:1][data:0-8][timestamp:4]
+    size_t buf_size = 2;
+    for (size_t i = 0; i < count; i++) {
+        buf_size += 4 + 1 + local_batch[i].dlc + 4;
+    }
+
+    AsyncWebSocketMessageBuffer* buffer = ws_.makeBuffer(buf_size);
+    if (!buffer) return;
+
+    uint8_t* buf = buffer->get();
+    size_t offset = 0;
+
+    buf[offset++] = 0x02;  // Batch CAN message type
+    buf[offset++] = (uint8_t)count;
+
+    for (size_t i = 0; i < count; i++) {
+        const CANBatchEntry& entry = local_batch[i];
+
+        buf[offset++] = (entry.id >> 0) & 0xFF;
+        buf[offset++] = (entry.id >> 8) & 0xFF;
+        buf[offset++] = (entry.id >> 16) & 0xFF;
+        buf[offset++] = (entry.id >> 24) & 0xFF;
+
+        buf[offset++] = entry.dlc;
+        memcpy(buf + offset, entry.data, entry.dlc);
+        offset += entry.dlc;
+
+        buf[offset++] = (entry.timestamp >> 0) & 0xFF;
+        buf[offset++] = (entry.timestamp >> 8) & 0xFF;
+        buf[offset++] = (entry.timestamp >> 16) & 0xFF;
+        buf[offset++] = (entry.timestamp >> 24) & 0xFF;
+    }
+
+    ws_.binaryAll(buffer);
     ws_messages_sent_++;
 }
 
@@ -808,9 +1009,15 @@ void WebServer::broadcastLog(const LogEntry& entry) {
 void WebServer::sendLogHistory(AsyncWebSocketClient* client) {
     if (client == nullptr) return;
 
+    // Check heap before allocating - need at least 15KB free for log history
+    if (ESP.getFreeHeap() < 15000) {
+        LOG_WARN("[WebSocket] Low heap (%u bytes), skipping log history", ESP.getFreeHeap());
+        return;
+    }
+
     // Limit the number of log entries to prevent memory allocation failures
     // Each entry can have 128+ bytes of message, so keep this small
-    constexpr size_t MAX_HISTORY_ENTRIES = 20;
+    constexpr size_t MAX_HISTORY_ENTRIES = 10;  // Reduced from 20
 
     LogEntry* logs = new (std::nothrow) LogEntry[MAX_HISTORY_ENTRIES];
     if (logs == nullptr) {
@@ -837,7 +1044,7 @@ void WebServer::sendLogHistory(AsyncWebSocketClient* client) {
         serializeJson(doc, json);
 
         // Check if the message is too large before sending
-        if (json.length() < 8192) {  // Limit to 8KB
+        if (json.length() < 4096) {  // Limit to 4KB
             client->text(json);
         } else {
             LOG_WARN("[WebSocket] Log history too large (%d bytes), skipping", json.length());
@@ -849,6 +1056,30 @@ void WebServer::sendLogHistory(AsyncWebSocketClient* client) {
 
 uint32_t WebServer::getWSClientCount() const {
     return ws_.count();
+}
+
+void WebServer::loop() {
+    uint32_t now = millis();
+
+    // Flush batched CAN messages every 100ms as a single WebSocket frame
+    if (now - last_can_flush_ >= 100) {
+        flushCANBatch();
+        last_can_flush_ = now;
+    }
+
+    // Perform WebSocket cleanup and ping every 10 seconds
+    if (now - last_ws_cleanup_ > 10000) {
+        last_ws_cleanup_ = now;
+
+        // Clean up dead connections
+        ws_.cleanupClients();
+
+        // Send ping to all clients to keep connections alive
+        if (ws_.count() > 0) {
+            ws_.pingAll();
+            LOG_DEBUG("[WebSocket] Sent ping to %u clients", ws_.count());
+        }
+    }
 }
 
 // JSON builders
@@ -920,6 +1151,7 @@ void WebServer::buildConfigJSON(JsonObject obj) {
     // Network (hide password for security)
     obj["wifi_ssid"] = settings.wifi_ssid;
     obj["wifi_configured"] = strlen(settings.wifi_password) > 0;
+    obj["mqtt_enabled"] = settings.mqtt_enabled;
     obj["mqtt_broker"] = settings.mqtt_broker;
     obj["mqtt_port"] = settings.mqtt_port;
     obj["mqtt_topic_prefix"] = settings.mqtt_topic_prefix;

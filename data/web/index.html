@@ -146,6 +146,13 @@
             <div class="settings-section">
               <h3>MQTT Configuration</h3>
               <form id="mqttForm">
+                <div class="form-group checkbox-group">
+                  <label>
+                    <input type="checkbox" id="mqttEnabled" name="mqtt_enabled" />
+                    <strong>Enable MQTT</strong>
+                  </label>
+                  <small class="form-help">Enable MQTT publishing (requires broker configuration)</small>
+                </div>
                 <div class="form-group">
                   <label for="mqttBroker">MQTT Broker</label>
                   <input

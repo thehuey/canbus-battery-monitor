@@ -54,6 +54,9 @@ public:
     // Set callbacks
     void setClientCallback(WSClientCallback callback) { client_callback_ = callback; }
 
+    // Periodic maintenance (call from main loop)
+    void loop();
+
     // Statistics
     uint32_t getRequestCount() const { return request_count_; }
     uint32_t getWSMessagesSent() const { return ws_messages_sent_; }
@@ -72,6 +75,23 @@ private:
 
     uint32_t request_count_;
     uint32_t ws_messages_sent_;
+    uint32_t last_ws_cleanup_;  // For periodic cleanup/ping
+
+    // CAN message batching - buffer messages and flush periodically
+    // to reduce WebSocket frame count and prevent queue overflow disconnects
+    static constexpr size_t CAN_BATCH_MAX = 25;
+    struct CANBatchEntry {
+        uint32_t id;
+        uint32_t timestamp;
+        uint8_t dlc;
+        uint8_t data[8];
+    };
+    CANBatchEntry can_batch_[CAN_BATCH_MAX];
+    volatile size_t can_batch_count_;
+    uint32_t last_can_flush_;
+    portMUX_TYPE can_batch_mux_;
+
+    void flushCANBatch();
 
     // Setup handlers
     void setupStaticFiles();

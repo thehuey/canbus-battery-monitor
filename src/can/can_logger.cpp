@@ -10,7 +10,8 @@ CANLogger::CANLogger()
       dropped_count(0),
       last_flush_time(0),
       auto_flush(true),
-      flush_interval_ms(CAN_LOG_FLUSH_INTERVAL_MS) {
+      flush_interval_ms(CAN_LOG_FLUSH_INTERVAL_MS),
+      mutex_(nullptr) {
     memset(log_filename, 0, sizeof(log_filename));
 }
 
@@ -21,6 +22,13 @@ bool CANLogger::begin(const char* log_file) {
     }
 
     Serial.println("CANLogger: Initializing...");
+
+    // Create mutex for thread safety
+    mutex_ = xSemaphoreCreateMutex();
+    if (mutex_ == nullptr) {
+        Serial.println("CANLogger: Failed to create mutex");
+        return false;
+    }
 
     // Initialize SPIFFS
     if (!SPIFFS.begin(true)) {  // true = format on fail
@@ -80,6 +88,12 @@ void CANLogger::end() {
     closeLogFile();
     SPIFFS.end();
 
+    // Delete mutex
+    if (mutex_ != nullptr) {
+        vSemaphoreDelete(mutex_);
+        mutex_ = nullptr;
+    }
+
     is_initialized = false;
 
     Serial.println("CANLogger: Shutdown complete");
@@ -116,9 +130,16 @@ bool CANLogger::flush() {
         return true;
     }
 
+    // Try to take mutex with timeout (don't block indefinitely)
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(100)) != pdTRUE) {
+        // Another task has the mutex, skip this flush
+        return true;
+    }
+
     // Open log file in append mode
     if (!openLogFile("a")) {
         Serial.println("CANLogger: Failed to open log file for flushing");
+        xSemaphoreGive(mutex_);
         return false;
     }
 
@@ -135,7 +156,9 @@ bool CANLogger::flush() {
     closeLogFile();
     last_flush_time = millis();
 
-    // Check if rotation is needed
+    xSemaphoreGive(mutex_);
+
+    // Check if rotation is needed (outside mutex to avoid deadlock)
     checkAndRotate();
 
     if (written > 0) {
@@ -150,6 +173,12 @@ bool CANLogger::clear() {
         return false;
     }
 
+    // Take mutex
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        Serial.println("CANLogger: Failed to acquire mutex for clear");
+        return false;
+    }
+
     Serial.println("CANLogger: Clearing log file...");
 
     // Remove the file
@@ -159,6 +188,7 @@ bool CANLogger::clear() {
 
     // Recreate with header
     if (!openLogFile("w")) {
+        xSemaphoreGive(mutex_);
         return false;
     }
 
@@ -172,6 +202,8 @@ bool CANLogger::clear() {
     message_count = 0;
     dropped_count = 0;
 
+    xSemaphoreGive(mutex_);
+
     Serial.println("CANLogger: Log cleared");
     return true;
 }
@@ -181,16 +213,22 @@ size_t CANLogger::getLogSize() {
         return 0;
     }
 
+    // Take mutex with short timeout
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return 0;
+    }
+
+    size_t size = 0;
     if (SPIFFS.exists(log_filename)) {
         File f = SPIFFS.open(log_filename, "r");
         if (f) {
-            size_t size = f.size();
+            size = f.size();
             f.close();
-            return size;
         }
     }
 
-    return 0;
+    xSemaphoreGive(mutex_);
+    return size;
 }
 
 bool CANLogger::exportCSV(Stream& output) {
@@ -200,7 +238,13 @@ bool CANLogger::exportCSV(Stream& output) {
 
     flush();  // Flush pending messages first
 
+    // Take mutex
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return false;
+    }
+
     if (!openLogFile("r")) {
+        xSemaphoreGive(mutex_);
         return false;
     }
 
@@ -210,6 +254,7 @@ bool CANLogger::exportCSV(Stream& output) {
     }
 
     closeLogFile();
+    xSemaphoreGive(mutex_);
     return true;
 }
 
@@ -220,7 +265,13 @@ bool CANLogger::exportFiltered(Stream& output, uint32_t filter_id) {
 
     flush();  // Flush pending messages first
 
+    // Take mutex
+    if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return false;
+    }
+
     if (!openLogFile("r")) {
+        xSemaphoreGive(mutex_);
         return false;
     }
 
@@ -257,6 +308,7 @@ bool CANLogger::exportFiltered(Stream& output, uint32_t filter_id) {
     }
 
     closeLogFile();
+    xSemaphoreGive(mutex_);
     return true;
 }
 

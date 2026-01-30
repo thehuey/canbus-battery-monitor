@@ -75,6 +75,13 @@ bool MQTTClient::begin(SettingsManager* settings, BatteryManager* batteries) {
 
     const Settings& config = settings_->getSettings();
 
+    // Check if MQTT is enabled
+    if (!config.mqtt_enabled) {
+        LOG_INFO("[MQTT] MQTT disabled in settings");
+        enabled_ = false;
+        return true;  // Not an error, just disabled
+    }
+
     // Check if MQTT is configured
     if (strlen(config.mqtt_broker) == 0) {
         LOG_INFO("[MQTT] No broker configured, MQTT disabled");
