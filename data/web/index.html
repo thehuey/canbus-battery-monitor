@@ -13,6 +13,8 @@
     />
     <title>eBike Monitor</title>
     <link rel="stylesheet" href="style.css" />
+    <script src="can_analyzer.js"></script>
+    <script src="dev_tools.js"></script>
   </head>
   <body>
     <div class="container">
@@ -85,6 +87,7 @@
             <button class="btn btn-sm" id="canPauseBtn">Pause</button>
             <button class="btn btn-sm" id="canClearBtn">Clear</button>
             <button class="btn btn-sm" id="canCopyBtn">Copy</button>
+            <button class="btn btn-sm" id="canStatsBtn">Stats</button>
             <label class="filter-label">
               Filter ID:
               <input type="text" id="canFilterInput" placeholder="0x123" class="filter-input" />
@@ -97,6 +100,55 @@
         <div class="can-monitor-footer">
           <span id="canMessageCount">0 messages</span>
           <span id="canPausedIndicator" style="display:none; color: #ff9800;">⏸ PAUSED</span>
+        </div>
+      </div>
+
+      <!-- Developer Tools Panel -->
+      <div class="dev-tools">
+        <div class="dev-tools-header">
+          <h2>Developer Tools</h2>
+          <div class="dev-tools-controls">
+            <button class="btn btn-sm" id="devExportBtn">Export Data</button>
+            <button class="btn btn-sm" id="devImportBtn">Import Data</button>
+            <input type="file" id="devImportFile" accept=".json" style="display:none" />
+          </div>
+        </div>
+
+        <div class="dev-tools-body">
+          <!-- Message Sender -->
+          <div class="dev-section">
+            <h3>Send CAN Message</h3>
+            <div class="dev-form">
+              <div class="form-row">
+                <label>
+                  ID (hex):
+                  <input type="text" id="devMsgId" placeholder="0x123" value="0x100" />
+                </label>
+                <label>
+                  DLC:
+                  <input type="number" id="devMsgDlc" min="0" max="8" value="8" />
+                </label>
+              </div>
+              <div class="form-row">
+                <label style="flex: 1">
+                  Data (hex):
+                  <input type="text" id="devMsgData" placeholder="01 02 03 04 05 06 07 08" value="00 00 00 00 00 00 00 00" />
+                </label>
+              </div>
+              <div class="form-row">
+                <button class="btn btn-primary" id="devSendBtn">Send Message</button>
+                <button class="btn btn-sm" id="devSendHistBtn">History</button>
+              </div>
+            </div>
+            <div id="devSendStatus" class="dev-status"></div>
+          </div>
+
+          <!-- Send History -->
+          <div class="dev-section" id="devHistorySection" style="display:none">
+            <h3>Send History</h3>
+            <div id="devHistoryList" class="dev-history-list"></div>
+            <button class="btn btn-sm" id="devHistoryClearBtn">Clear History</button>
+          </div>
         </div>
       </div>
 
@@ -333,7 +385,32 @@
                     <span class="api-path">/api/can/diagnostics</span>
                   </a>
 
-              </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CAN Stats Modal -->
+      <div class="modal" id="statsModal">
+        <div class="modal-content modal-wide">
+          <div class="modal-header">
+            <h2>CAN Message Statistics</h2>
+            <button class="btn-close" id="closeStats">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="stats-controls">
+              <span id="statsCount">0 unique IDs</span>
+              <div class="decode-toggle" id="decodeToggle">
+                <button class="decode-btn active" data-mode="hex">HEX</button>
+                <button class="decode-btn" data-mode="ascii">ASCII</button>
+                <button class="decode-btn" data-mode="dec-byte">DEC</button>
+                <button class="decode-btn" data-mode="dec-16le">16-LE</button>
+              </div>
+              <button class="btn btn-sm" id="statsClearBtn">Clear All Data</button>
+            </div>
+            <div id="statsTableContainer" class="stats-table-container">
+              <div class="loading">No data yet - connect to device</div>
             </div>
           </div>
         </div>

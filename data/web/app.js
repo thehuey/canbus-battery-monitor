@@ -16,11 +16,31 @@ class BatteryMonitor {
       filter: null,
     };
 
+    // CAN Analyzer (IndexedDB + statistics)
+    this.canAnalyzer = null;
+    this.statsDecodeMode = 'hex';
+
+    // Developer Tools (message sending)
+    this.devTools = null;
+
     this.init();
   }
 
-  init() {
+  async init() {
+    // Initialize CAN Analyzer (wait for IndexedDB)
+    if (window.CANAnalyzer) {
+      this.canAnalyzer = new window.CANAnalyzer();
+      console.debug("[App] CAN Analyzer initialized");
+    }
+
+    // Initialize Developer Tools
+    if (window.DevTools) {
+      this.devTools = new window.DevTools();
+      console.debug("[App] Developer Tools initialized");
+    }
+
     this.setupEventListeners();
+    this.setupASCIIDetection();
     this.loadConfig();
     this.connectWebSocket();
     this.startPeriodicUpdates();
@@ -30,13 +50,13 @@ class BatteryMonitor {
     // Close WebSocket when page is hidden or closed
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
-        console.log("Page hidden, closing WebSocket");
+        console.debug("Page hidden, closing WebSocket");
         if (this.ws) {
           this.ws.close();
         }
         this.clearReconnectInterval();
       } else {
-        console.log("Page visible, reconnecting WebSocket");
+        console.debug("Page visible, reconnecting WebSocket");
         this.connectWebSocket();
       }
     });
@@ -120,20 +140,123 @@ class BatteryMonitor {
     document.getElementById("canFilterInput").addEventListener("input", (e) => {
       this.setCANFilter(e.target.value.trim());
     });
+
+    // CAN Stats button
+    const statsBtn = document.getElementById("canStatsBtn");
+    if (statsBtn) {
+      statsBtn.addEventListener("click", () => {
+        this.showCANStats();
+      });
+    }
+
+    // Stats modal close
+    const closeStats = document.getElementById("closeStats");
+    if (closeStats) {
+      closeStats.addEventListener("click", () => {
+        document.getElementById("statsModal").classList.remove("active");
+      });
+    }
+
+    const statsModal = document.getElementById("statsModal");
+    if (statsModal) {
+      statsModal.addEventListener("click", (e) => {
+        if (e.target.id === "statsModal") {
+          statsModal.classList.remove("active");
+        }
+      });
+    }
+
+    // Stats clear button
+    const statsClearBtn = document.getElementById("statsClearBtn");
+    if (statsClearBtn) {
+      statsClearBtn.addEventListener("click", async () => {
+        if (confirm("Clear all analyzer data? This cannot be undone.")) {
+          if (this.canAnalyzer) {
+            await this.canAnalyzer.clearAllData();
+            this.showCANStats(); // Refresh the view
+            this.showToast("All analyzer data cleared", "success");
+          }
+        }
+      });
+    }
+
+    // Decode toggle buttons
+    const decodeToggle = document.getElementById("decodeToggle");
+    if (decodeToggle) {
+      decodeToggle.addEventListener("click", (e) => {
+        const btn = e.target.closest(".decode-btn");
+        if (!btn) return;
+        decodeToggle.querySelectorAll(".decode-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        this.statsDecodeMode = btn.dataset.mode;
+        this.refreshStatsData();
+      });
+    }
+
+    // Developer Tools - Export/Import
+    const exportBtn = document.getElementById("devExportBtn");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", () => {
+        this.exportAnalyzerData();
+      });
+    }
+
+    const importBtn = document.getElementById("devImportBtn");
+    const importFile = document.getElementById("devImportFile");
+    if (importBtn && importFile) {
+      importBtn.addEventListener("click", () => {
+        importFile.click();
+      });
+
+      importFile.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          this.importAnalyzerData(file);
+        }
+        e.target.value = ""; // Reset file input
+      });
+    }
+
+    // Developer Tools - Send Message
+    const sendBtn = document.getElementById("devSendBtn");
+    if (sendBtn) {
+      sendBtn.addEventListener("click", () => {
+        this.sendCANMessage();
+      });
+    }
+
+    // Developer Tools - History
+    const histBtn = document.getElementById("devSendHistBtn");
+    if (histBtn) {
+      histBtn.addEventListener("click", () => {
+        this.toggleSendHistory();
+      });
+    }
+
+    const histClearBtn = document.getElementById("devHistoryClearBtn");
+    if (histClearBtn) {
+      histClearBtn.addEventListener("click", () => {
+        this.clearSendHistory();
+      });
+    }
   }
 
   // WebSocket Management
   connectWebSocket() {
     // Prevent multiple simultaneous connection attempts
-    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
-      console.log("WebSocket already connecting or connected, skipping");
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.CONNECTING ||
+        this.ws.readyState === WebSocket.OPEN)
+    ) {
+      console.debug("WebSocket already connecting or connected, skipping");
       return;
     }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}/ws`;
 
-    console.log("Connecting to WebSocket:", wsUrl);
+    console.debug("Connecting to WebSocket:", wsUrl);
 
     try {
       // Close existing connection if any
@@ -145,12 +268,17 @@ class BatteryMonitor {
       this.ws = new WebSocket(wsUrl);
 
       // Set binary type to arraybuffer (not blob) for efficient binary handling
-      this.ws.binaryType = 'arraybuffer';
+      this.ws.binaryType = "arraybuffer";
 
       this.ws.onopen = () => {
-        console.log("WebSocket connected");
+        console.debug("WebSocket connected");
         this.showToast("Connected", "success");
         this.clearReconnectInterval();
+
+        // Pass WebSocket to DevTools for sending messages
+        if (this.devTools) {
+          this.devTools.setWebSocket(this.ws);
+        }
       };
 
       this.ws.onmessage = (event) => {
@@ -179,7 +307,7 @@ class BatteryMonitor {
       };
 
       this.ws.onclose = () => {
-        console.log("WebSocket disconnected");
+        console.debug("WebSocket disconnected");
         this.showToast("Disconnected - Reconnecting...", "warning");
         this.scheduleReconnect();
       };
@@ -201,7 +329,7 @@ class BatteryMonitor {
 
       // Only log non-log messages to avoid spam (logs go to /logs page)
       if (message.type !== "log" && message.type !== "log_history") {
-        console.log("WebSocket message:", message.type, message);
+        console.debug("WebSocket message:", message.type, message);
       }
 
       switch (message.type) {
@@ -309,20 +437,20 @@ class BatteryMonitor {
 
   scheduleReconnect() {
     if (this.reconnectInterval) {
-      console.log("Reconnect already scheduled");
+      console.debug("Reconnect already scheduled");
       return;
     }
 
-    console.log("Scheduling reconnect in 1 second...");
+    console.debug("Scheduling reconnect in 1 second...");
     this.reconnectInterval = setInterval(() => {
-      console.log("Attempting to reconnect...");
+      console.debug("Attempting to reconnect...");
       this.connectWebSocket();
     }, 1000);
   }
 
   clearReconnectInterval() {
     if (this.reconnectInterval) {
-      console.log("Clearing reconnect interval");
+      console.debug("Clearing reconnect interval");
       clearInterval(this.reconnectInterval);
       this.reconnectInterval = null;
     }
@@ -427,9 +555,6 @@ class BatteryMonitor {
     if (!identifier || identifier <= 0) return null;
 
     try {
-      // Convert to string and ensure it's the right length
-      const idStr = identifier.toString();
-
       // Extract components using decimal division/modulo
       const year = Math.floor(identifier / 100000000) + 2000;
       const day = Math.floor(identifier / 1000000) % 100;
@@ -544,7 +669,8 @@ class BatteryMonitor {
     document.getElementById("wifiSSID").value = this.config.wifi_ssid || "";
 
     // MQTT
-    document.getElementById("mqttEnabled").checked = this.config.mqtt_enabled !== false;
+    document.getElementById("mqttEnabled").checked =
+      this.config.mqtt_enabled !== false;
     document.getElementById("mqttBroker").value = this.config.mqtt_broker || "";
     document.getElementById("mqttPort").value = this.config.mqtt_port || 1883;
     document.getElementById("mqttUsername").value =
@@ -800,6 +926,12 @@ class BatteryMonitor {
   // CAN Monitor Methods
   handleCANMessage(message) {
     // console.log("CAN message received:", message);
+
+    // Analyze message with CAN Analyzer
+    if (this.canAnalyzer) {
+      this.canAnalyzer.analyzeMessage(message);
+    }
+
     if (this.canMonitor.paused) return;
 
     // Apply filter if set
@@ -814,7 +946,10 @@ class BatteryMonitor {
 
     // Format timestamp
     const now = new Date();
-    const timestamp = now.toLocaleTimeString() + "." + now.getMilliseconds().toString().padStart(3, "0");
+    const timestamp =
+      now.toLocaleTimeString() +
+      "." +
+      now.getMilliseconds().toString().padStart(3, "0");
 
     // Format message line
     const line = `[${timestamp}] ID:${message.id} DLC:${message.dlc} Data:${message.data}\n`;
@@ -824,12 +959,16 @@ class BatteryMonitor {
 
     // Update counter
     this.canMonitor.messageCount++;
-    document.getElementById("canMessageCount").textContent = this.formatNumber(this.canMonitor.messageCount);
+    document.getElementById("canMessageCount").textContent = this.formatNumber(
+      this.canMonitor.messageCount,
+    );
 
     // Limit total lines to prevent memory issues
     const lines = viewer.value.split("\n");
     if (lines.length > this.canMonitor.maxMessages) {
-      viewer.value = lines.slice(lines.length - this.canMonitor.maxMessages).join("\n");
+      viewer.value = lines
+        .slice(lines.length - this.canMonitor.maxMessages)
+        .join("\n");
     }
 
     // Auto-scroll to bottom
@@ -866,22 +1005,365 @@ class BatteryMonitor {
       return;
     }
 
-    navigator.clipboard.writeText(viewer.value)
-      .then(() => {
-        this.showToast("Copied to clipboard!", "success");
-      })
-      .catch(() => {
-        // Fallback for older browsers
-        viewer.select();
-        document.execCommand("copy");
-        this.showToast("Copied to clipboard!", "success");
-      });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(viewer.value)
+        .then(() => {
+          this.showToast("Copied to clipboard!", "success");
+        })
+        .catch(() => {
+          this.fallbackCopy(viewer);
+        });
+    } else {
+      this.fallbackCopy(viewer);
+    }
+  }
+
+  fallbackCopy(textarea) {
+    textarea.select();
+    document.execCommand("copy");
+    this.showToast("Copied to clipboard!", "success");
   }
 
   setCANFilter(value) {
     this.canMonitor.filter = value || null;
-    const filterText = value ? ` (filtered by ${value})` : "";
-    console.log(`CAN filter ${value ? "set to: " + value : "cleared"}`);
+    console.debug(`CAN filter ${value ? "set to: " + value : "cleared"}`);
+  }
+
+  // ASCII detection is now handled inline by the analyzer.
+  // No separate event system needed - results are shown in the stats UI.
+  setupASCIIDetection() {
+    // Placeholder - ASCII detection is integrated into can_analyzer.js
+  }
+
+  // Export analyzer data
+  async exportAnalyzerData() {
+    if (!this.canAnalyzer) {
+      this.showToast("Analyzer not available", "error");
+      return;
+    }
+
+    try {
+      const data = await this.canAnalyzer.exportData();
+      const json = JSON.stringify(data, null, 2);
+
+      // Use data: URI instead of blob: to work over plain HTTP
+      const a = document.createElement("a");
+      a.href = "data:application/json;charset=utf-8," + encodeURIComponent(json);
+      a.download = `can_analysis_${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      this.showToast("Data exported successfully", "success");
+    } catch (error) {
+      console.error("Export failed:", error);
+      this.showToast("Export failed", "error");
+    }
+  }
+
+  // Import analyzer data
+  async importAnalyzerData(file) {
+    if (!this.canAnalyzer) {
+      this.showToast("Analyzer not available", "error");
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const success = await this.canAnalyzer.importData(data);
+
+      if (success) {
+        this.showToast("Data imported successfully", "success");
+      } else {
+        this.showToast("Import failed", "error");
+      }
+    } catch (error) {
+      console.error("Import failed:", error);
+      this.showToast("Import failed - invalid file", "error");
+    }
+  }
+
+  // Show CAN statistics in a modal UI
+  showCANStats() {
+    try {
+      if (!this.canAnalyzer) {
+        this.showToast("Analyzer not loaded - check browser console", "error");
+        console.error("[Stats] canAnalyzer is null. window.CANAnalyzer:", typeof window.CANAnalyzer);
+        return;
+      }
+
+      const modal = document.getElementById("statsModal");
+      const container = document.getElementById("statsTableContainer");
+      const countEl = document.getElementById("statsCount");
+
+      if (!modal || !container || !countEl) {
+        this.showToast("Stats UI elements missing - re-upload index.html", "error");
+        console.error("[Stats] Missing DOM elements:", { modal: !!modal, container: !!container, countEl: !!countEl });
+        return;
+      }
+
+      const stats = this.canAnalyzer.getAllStats();
+      const totalMsgs = stats.reduce((s, e) => s + e.count, 0);
+
+      countEl.textContent = `${stats.length} unique IDs, ${totalMsgs.toLocaleString()} total msgs`;
+
+      if (stats.length === 0) {
+        container.innerHTML = '<div class="loading">No CAN messages captured yet</div>';
+      } else {
+        container.innerHTML = this.buildStatsTable(stats);
+        this.attachStatsHandlers(container);
+      }
+
+      modal.classList.add("active");
+    } catch (error) {
+      console.error("[Stats] showCANStats failed:", error);
+      this.showToast("Stats error: " + error.message, "error");
+    }
+  }
+
+  refreshStatsData() {
+    if (!this.canAnalyzer) return;
+    const container = document.getElementById("statsTableContainer");
+    if (!container) return;
+
+    const stats = this.canAnalyzer.getAllStats();
+    if (stats.length === 0) return;
+
+    container.innerHTML = this.buildStatsTable(stats);
+    this.attachStatsHandlers(container);
+  }
+
+  buildStatsTable(stats) {
+    const modeLabels = { hex: 'HEX', ascii: 'ASCII', 'dec-byte': 'DEC', 'dec-16le': '16-LE' };
+    const dataHeader = 'Last Data (' + (modeLabels[this.statsDecodeMode] || 'HEX') + ')';
+    let html = `<table class="stats-table">
+      <thead><tr>
+        <th>ID</th>
+        <th>Count</th>
+        <th>DLC</th>
+        <th>Interval</th>
+        <th>Unique</th>
+        <th>${dataHeader}</th>
+        <th>ASCII</th>
+      </tr></thead><tbody>`;
+
+    for (const s of stats) {
+      const uniqueData = this.canAnalyzer.getUniqueData(s.id);
+      const lastEntry = uniqueData.length > 0 ? uniqueData[0] : null;
+      const lastHex = lastEntry ? this.formatDataForMode(lastEntry.hex) : '-';
+      const interval = s.avgInterval > 0 ? Math.round(s.avgInterval) + 'ms' : '-';
+
+      // Find any ASCII values among unique data
+      const asciiEntries = uniqueData.filter(d => d.ascii);
+      let asciiCol = '';
+      if (asciiEntries.length > 0) {
+        asciiCol = `<span class="ascii-badge">ASCII</span> ${this.escapeHtml(asciiEntries[0].ascii)}`;
+      }
+
+      html += `<tr class="stats-row" data-id="${this.escapeHtml(s.id)}">
+        <td class="id-cell">${this.escapeHtml(s.id)}</td>
+        <td class="count-cell">${s.count.toLocaleString()}</td>
+        <td>${s.dlc}</td>
+        <td class="interval-cell">${interval}</td>
+        <td>${uniqueData.length}</td>
+        <td>${lastHex}</td>
+        <td>${asciiCol}</td>
+      </tr>`;
+
+      // Expandable detail row
+      html += `<tr class="stats-detail" data-detail-id="${this.escapeHtml(s.id)}">
+        <td colspan="7">
+          <div class="data-list">`;
+
+      for (const d of uniqueData.slice(0, 50)) {
+        const hexFormatted = this.formatDataForMode(d.hex);
+        const asciiPart = d.ascii ? `<span class="data-ascii">"${this.escapeHtml(d.ascii)}"</span>` : '';
+        html += `<div class="data-entry">
+          <span class="data-hex">${hexFormatted}</span>
+          ${asciiPart}
+          <span class="data-count">${d.count.toLocaleString()}x</span>
+        </div>`;
+      }
+
+      if (uniqueData.length > 50) {
+        html += `<div class="data-entry"><span class="data-count">... and ${uniqueData.length - 50} more</span></div>`;
+      }
+
+      html += `</div></td></tr>`;
+    }
+
+    html += '</tbody></table>';
+    return html;
+  }
+
+  attachStatsHandlers(container) {
+    container.querySelectorAll('.stats-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const id = row.dataset.id;
+        const detailRow = container.querySelector(`[data-detail-id="${id}"]`);
+        if (!detailRow) return;
+
+        const isExpanded = detailRow.classList.contains('expanded');
+        // Collapse all
+        container.querySelectorAll('.stats-detail').forEach(d => d.classList.remove('expanded'));
+        container.querySelectorAll('.stats-row').forEach(r => r.classList.remove('expanded'));
+        // Toggle this one
+        if (!isExpanded) {
+          detailRow.classList.add('expanded');
+          row.classList.add('expanded');
+        }
+      });
+    });
+  }
+
+  formatHexSpaced(hex) {
+    if (!hex) return '';
+    return hex.match(/.{1,2}/g).join(' ');
+  }
+
+  formatDataForMode(hex) {
+    if (!hex) return '';
+    const bytes = hex.match(/.{1,2}/g);
+    if (!bytes) return '';
+
+    switch (this.statsDecodeMode) {
+      case 'ascii':
+        return bytes.map(b => {
+          const code = parseInt(b, 16);
+          return (code >= 0x20 && code <= 0x7E) ? String.fromCharCode(code) : '.';
+        }).join('');
+      case 'dec-byte':
+        return bytes.map(b => parseInt(b, 16)).join(' ');
+      case 'dec-16le':
+        const words = [];
+        for (let i = 0; i < bytes.length; i += 2) {
+          const lo = parseInt(bytes[i], 16);
+          if (i + 1 < bytes.length) {
+            const hi = parseInt(bytes[i + 1], 16);
+            words.push((hi << 8) | lo);
+          } else {
+            words.push(lo);
+          }
+        }
+        return words.join(' ');
+      case 'hex':
+      default:
+        return bytes.join(' ');
+    }
+  }
+
+  // Send CAN message via developer tools
+  sendCANMessage() {
+    if (!this.devTools) {
+      this.showToast("DevTools not available", "error");
+      return;
+    }
+
+    const idInput = document.getElementById("devMsgId");
+    const dlcInput = document.getElementById("devMsgDlc");
+    const dataInput = document.getElementById("devMsgData");
+    const statusEl = document.getElementById("devSendStatus");
+
+    try {
+      const id = idInput.value.trim();
+      const dlc = parseInt(dlcInput.value);
+      const data = dataInput.value.trim();
+
+      // Send message
+      const msg = this.devTools.sendCANMessage(id, dlc, data);
+
+      // Show success status
+      statusEl.textContent = `✓ Sent: ID=${msg.id.toString(16).toUpperCase().padStart(3, "0")} DLC=${msg.dlc}`;
+      statusEl.className = "dev-status success";
+
+      setTimeout(() => {
+        statusEl.className = "dev-status";
+      }, 3000);
+
+      this.showToast("Message sent successfully", "success");
+    } catch (error) {
+      // Show error status
+      statusEl.textContent = `✗ Error: ${error.message}`;
+      statusEl.className = "dev-status error";
+
+      this.showToast(`Send failed: ${error.message}`, "error");
+    }
+  }
+
+  // Toggle send history visibility
+  toggleSendHistory() {
+    const histSection = document.getElementById("devHistorySection");
+    if (!histSection) return;
+
+    if (histSection.style.display === "none") {
+      histSection.style.display = "block";
+      this.updateSendHistory();
+    } else {
+      histSection.style.display = "none";
+    }
+  }
+
+  // Update send history display
+  updateSendHistory() {
+    if (!this.devTools) return;
+
+    const histList = document.getElementById("devHistoryList");
+    if (!histList) return;
+
+    const history = this.devTools.getHistory();
+
+    if (history.length === 0) {
+      histList.innerHTML =
+        '<div style="color: var(--text-muted); padding: 1rem; text-align: center;">No messages sent yet</div>';
+      return;
+    }
+
+    histList.innerHTML = history
+      .map((msg, index) => {
+        const formatted = this.devTools.formatMessage(msg);
+        return `
+        <div class="dev-history-item" data-index="${index}">
+          <div class="history-msg">
+            ID:${formatted.id} DLC:${formatted.dlc} Data:${formatted.data}
+          </div>
+          <div class="history-time">${formatted.timestamp}</div>
+        </div>
+      `;
+      })
+      .join("");
+
+    // Add click handlers to resend
+    histList.querySelectorAll(".dev-history-item").forEach((item) => {
+      item.addEventListener("click", () => {
+        const index = parseInt(item.dataset.index);
+        this.resendFromHistory(index);
+      });
+    });
+  }
+
+  // Resend message from history
+  resendFromHistory(index) {
+    if (!this.devTools) return;
+
+    try {
+      this.devTools.resendFromHistory(index);
+      this.showToast("Message resent from history", "success");
+    } catch (error) {
+      this.showToast(`Resend failed: ${error.message}`, "error");
+    }
+  }
+
+  // Clear send history
+  clearSendHistory() {
+    if (!this.devTools) return;
+
+    if (confirm("Clear all send history?")) {
+      this.devTools.clearHistory();
+      this.updateSendHistory();
+      this.showToast("Send history cleared", "success");
+    }
   }
 }
 
