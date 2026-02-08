@@ -285,6 +285,8 @@ void WebServer::setupStaticFiles() {
     // Serve specific static files (JS, CSS, etc.) from /web directory
     server_.serveStatic("/app.js", SPIFFS, "/web/app.js");
     server_.serveStatic("/style.css", SPIFFS, "/web/style.css");
+    server_.serveStatic("/dev_tools.js", SPIFFS, "/web/dev_tools.js");
+    server_.serveStatic("/can_analyzer.js", SPIFFS, "/web/can_analyzer.js");
 
     // Serve all files from /static/ path for debugging
     server_.serveStatic("/static/", SPIFFS, "/");
@@ -864,7 +866,7 @@ void WebServer::onWSEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                 if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
                     data[len] = 0;  // Null-terminate
                     LOG_DEBUG("[WebSocket] Received: %s",(char*)data);
-                    // Could handle client commands here
+                    handleWSCommand(client, (char*)data);
                 }
             }
             break;
@@ -1232,4 +1234,66 @@ void WebServer::sendError(AsyncWebServerRequest* request, int code, const char* 
     doc["code"] = code;
     doc["message"] = message;
     sendJSON(request, doc, code);
+}
+
+void WebServer::handleWSCommand(AsyncWebSocketClient* client, const char* data) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, data);
+
+    if (error) {
+        LOG_WARN("[WebSocket] Invalid JSON command from client #%u", client->id());
+        return;
+    }
+
+    const char* cmd = doc["cmd"] | "";
+
+    if (strcmp(cmd, "can_send") == 0) {
+        // Parse CAN message fields
+        uint32_t id = doc["id"] | 0;
+        uint8_t dlc = doc["dlc"] | 0;
+        bool extended = doc["extended"] | false;
+
+        // Validate ID range
+        if (extended) {
+            if (id > 0x1FFFFFFF) {
+                client->text("{\"error\":\"Extended CAN ID out of range (max 0x1FFFFFFF)\"}");
+                return;
+            }
+        } else {
+            if (id > 0x7FF) {
+                client->text("{\"error\":\"Standard CAN ID out of range (max 0x7FF)\"}");
+                return;
+            }
+        }
+
+        // Validate DLC
+        if (dlc > 8) {
+            client->text("{\"error\":\"DLC out of range (max 8)\"}");
+            return;
+        }
+
+        // Build CAN message
+        CANMessage msg;
+        msg.id = id;
+        msg.dlc = dlc;
+        msg.extended = extended;
+        msg.rtr = false;
+        msg.timestamp = millis();
+
+        // Parse data bytes from JSON array
+        JsonArray dataArr = doc["data"].as<JsonArray>();
+        for (uint8_t i = 0; i < dlc && i < 8; i++) {
+            msg.data[i] = dataArr[i] | 0;
+        }
+
+        // Send via CAN driver
+        if (canDriver.sendMessage(msg)) {
+            LOG_INFO("[WebSocket] CAN TX: ID=0x%08X DLC=%u EXT=%s from client #%u",
+                     msg.id, msg.dlc, msg.extended ? "yes" : "no", client->id());
+            client->text("{\"ok\":true}");
+        } else {
+            LOG_WARN("[WebSocket] CAN TX failed: ID=0x%08X from client #%u", msg.id, client->id());
+            client->text("{\"error\":\"CAN transmit failed\"}");
+        }
+    }
 }
