@@ -122,11 +122,15 @@
               <div class="form-row">
                 <label>
                   ID (hex):
-                  <input type="text" id="devMsgId" placeholder="0x123" value="0x100" />
+                  <input type="text" id="devMsgId" placeholder="0x123 or 0x1ABCDEF0" value="0x100" />
                 </label>
                 <label>
                   DLC:
                   <input type="number" id="devMsgDlc" min="0" max="8" value="8" />
+                </label>
+                <label class="checkbox-inline">
+                  <input type="checkbox" id="devMsgExtended" />
+                  Extended (29-bit)
                 </label>
               </div>
               <div class="form-row">

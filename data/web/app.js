@@ -1271,11 +1271,18 @@ class BatteryMonitor {
       const dlc = parseInt(dlcInput.value);
       const data = dataInput.value.trim();
 
-      // Send message
-      const msg = this.devTools.sendCANMessage(id, dlc, data);
+      // Check extended checkbox
+      const extCheckbox = document.getElementById("devMsgExtended");
+      const extended = extCheckbox ? extCheckbox.checked : undefined;
 
-      // Show success status
-      statusEl.textContent = `✓ Sent: ID=${msg.id.toString(16).toUpperCase().padStart(3, "0")} DLC=${msg.dlc}`;
+      // Send message (pass extended override if checkbox exists)
+      const msg = this.devTools.sendCANMessage(id, dlc, data, extended ? true : undefined);
+
+      // Show success status with appropriate ID padding
+      const idPad = msg.extended ? 8 : 3;
+      const idHex = msg.id.toString(16).toUpperCase().padStart(idPad, "0");
+      const extLabel = msg.extended ? " [EXT]" : "";
+      statusEl.textContent = `Sent: ID=0x${idHex}${extLabel} DLC=${msg.dlc}`;
       statusEl.className = "dev-status success";
 
       setTimeout(() => {
