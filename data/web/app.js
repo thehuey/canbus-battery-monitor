@@ -1177,7 +1177,7 @@ class BatteryMonitor {
         <td colspan="7">
           <div class="data-list">`;
 
-      for (const d of uniqueData.slice(0, 50)) {
+      for (const d of uniqueData) {
         const hexFormatted = this.formatDataForMode(d.hex);
         const asciiPart = d.ascii ? `<span class="data-ascii">"${this.escapeHtml(d.ascii)}"</span>` : '';
         html += `<div class="data-entry">
@@ -1185,10 +1185,6 @@ class BatteryMonitor {
           ${asciiPart}
           <span class="data-count">${d.count.toLocaleString()}x</span>
         </div>`;
-      }
-
-      if (uniqueData.length > 50) {
-        html += `<div class="data-entry"><span class="data-count">... and ${uniqueData.length - 50} more</span></div>`;
       }
 
       html += `</div></td></tr>`;
