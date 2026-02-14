@@ -61,16 +61,16 @@
       "can_id": 515,
       "can_id_hex": "0x203",
       "name": "State of Charge",
-      "description": "Current SOC and maximum SOC capacity",
+      "description": "Current SOC and maximum SOC capacity in milliamp-hours (mAh)",
       "period_ms": 50,
       "fields": [
         {
           "name": "soc",
-          "description": "Current state of charge",
+          "description": "Current state of charge in mAh",
           "byte_offset": 0,
           "length": 2,
           "data_type": "uint16_le",
-          "unit": "",
+          "unit": "mAh",
           "scale": 1.0,
           "offset": 0.0,
           "min_value": 0,
@@ -78,11 +78,11 @@
         },
         {
           "name": "max_soc",
-          "description": "Maximum state of charge capacity",
+          "description": "Maximum state of charge capacity in mAh",
           "byte_offset": 4,
           "length": 2,
           "data_type": "uint16_le",
-          "unit": "",
+          "unit": "mAh",
           "scale": 1.0,
           "offset": 0.0,
           "min_value": 0,
@@ -113,13 +113,13 @@
     {
       "can_id": 516,
       "can_id_hex": "0x204",
-      "name": "State/Command",
-      "description": "Battery state machine or charge phase indicator",
+      "name": "Battery State",
+      "description": "Battery state machine indicator (idle, standby, charging phases)",
       "period_ms": 100,
       "fields": [
         {
           "name": "state",
-          "description": "State value that counts down during charging",
+          "description": "Battery operating state (0x00=idle, 0x10=standby, 0x20-0x22=charging phases)",
           "byte_offset": 0,
           "length": 1,
           "data_type": "uint8",
@@ -127,16 +127,34 @@
           "scale": 1.0,
           "offset": 0.0,
           "enum_values": {
-            "34": "charging_phase_1",
+            "0": "idle",
+            "16": "standby",
+            "32": "charging_phase_1",
             "33": "charging_phase_2",
-            "32": "charging_phase_3",
-            "16": "charge_complete",
-            "0": "idle"
+            "34": "charging_phase_3"
           },
           "min_value": 0,
           "max_value": 255
         }
       ]
+    },
+    {
+      "can_id": 303235072,
+      "can_id_hex": "0x12183000",
+      "name": "Sleep Command",
+      "description": "Extended frame command that puts the battery to sleep (DLC=0, no data)",
+      "extended": true,
+      "period_ms": 0,
+      "fields": []
+    },
+    {
+      "can_id": 320045056,
+      "can_id_hex": "0x130C6000",
+      "name": "Wake Command",
+      "description": "Extended frame command to wake the battery up (DLC=0, no data)",
+      "extended": true,
+      "period_ms": 0,
+      "fields": []
     }
   ]
 }
