@@ -56,7 +56,7 @@ static Definition createDPowerProtocol() {
     proto.cell_count = 13;
     proto.nominal_voltage = 48.0f;
     proto.capacity_ah = 25.0f;
-    proto.message_count = 4;
+    proto.message_count = 6;
 
     // Message 0x201 - Pack Identification
     Message& msg201 = proto.messages[0];
@@ -70,21 +70,17 @@ static Definition createDPowerProtocol() {
                                  0, 4, DataType::UINT32_LE, "", 1.0f, 0.0f, "",
                                  0.0f, 0.0f, false, false);
 
-    // Message 0x202 - Total Pack Voltage
+    // Message 0x202 - Cell Voltage (series of 13)
     Message& msg202 = proto.messages[1];
     msg202.can_id = 0x202;
-    strncpy(msg202.name, "Total Pack Voltage", sizeof(msg202.name) - 1);
-    strncpy(msg202.description, "Sum of all cell voltages", sizeof(msg202.description) - 1);
+    strncpy(msg202.name, "Cell Voltage", sizeof(msg202.name) - 1);
+    strncpy(msg202.description, "Cell voltage mV (13 in seq)", sizeof(msg202.description) - 1);
     msg202.period_ms = 100;
-    msg202.field_count = 2;
+    msg202.field_count = 1;
 
-    msg202.fields[0] = makeField("total_voltage_mv", "Total pack voltage (sum of all cells)",
+    msg202.fields[0] = makeField("cell_voltage_mv", "Cell voltage in mV (series)",
                                  0, 2, DataType::UINT16_LE, "mV", 1.0f, 0.0f, "",
-                                 39000.0f, 54600.0f, true, true);
-
-    msg202.fields[1] = makeField("avg_cell_voltage_mv", "Average cell voltage calculated from total",
-                                 0, 2, DataType::UINT16_LE, "mV", 0.07692307692f, 0.0f, "value / 13",
-                                 3000.0f, 4200.0f, true, true);
+                                 0.0f, 5000.0f, true, true);
 
     // Message 0x203 - State of Charge
     Message& msg203 = proto.messages[2];
@@ -120,6 +116,23 @@ static Definition createDPowerProtocol() {
     addEnumValue(msg204.fields[0], 32, "charging_phase_3");
     addEnumValue(msg204.fields[0], 16, "charge_complete");
     addEnumValue(msg204.fields[0], 0, "idle");
+
+    // Message 0x70C6800 - BMS Information (extended frame)
+    Message& msgBMS = proto.messages[4];
+    msgBMS.can_id = 0x70C6800;
+    strncpy(msgBMS.name, "BMS Information", sizeof(msgBMS.name) - 1);
+    strncpy(msgBMS.description, "HW/FW/BMS type ASCII text", sizeof(msgBMS.description) - 1);
+    msgBMS.period_ms = 1000;
+    msgBMS.field_count = 1;
+
+    msgBMS.fields[0] = makeField("bms_info", "ASCII HW/FW/BMS info string",
+                                 0, 8, DataType::UINT8, "", 1.0f, 0.0f, "",
+                                 0.0f, 0.0f, false, false);
+
+    // Reserve slot 5 for future use
+    proto.messages[5].can_id = 0;
+    proto.messages[5].field_count = 0;
+    proto.message_count = 5;
 
     return proto;
 }

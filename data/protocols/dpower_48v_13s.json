@@ -39,34 +39,21 @@
     {
       "can_id": 514,
       "can_id_hex": "0x202",
-      "name": "Total Pack Voltage",
-      "description": "Sum of all cell voltages in millivolts",
+      "name": "Cell Voltage",
+      "description": "Individual cell voltage in mV. Sent as a series of 13 messages, one per cell in sequence.",
       "period_ms": 100,
       "fields": [
         {
-          "name": "total_voltage_mv",
-          "description": "Total pack voltage (sum of all cells)",
+          "name": "cell_voltage_mv",
+          "description": "Cell voltage in millivolts (series of 13 sequential messages for cells 0-12)",
           "byte_offset": 0,
           "length": 2,
           "data_type": "uint16_le",
           "unit": "mV",
           "scale": 1.0,
           "offset": 0.0,
-          "min_value": 38000,
-          "max_value": 54600
-        },
-        {
-          "name": "avg_cell_voltage_mv",
-          "description": "Average cell voltage calculated from total",
-          "byte_offset": 0,
-          "length": 2,
-          "data_type": "uint16_le",
-          "unit": "mV",
-          "scale": 0.07692307692,
-          "offset": 0.0,
-          "formula": "value / 13",
-          "min_value": 3000,
-          "max_value": 4200
+          "min_value": 0,
+          "max_value": 5000
         }
       ]
     },
@@ -100,6 +87,26 @@
           "offset": 0.0,
           "min_value": 0,
           "max_value": 65535
+        }
+      ]
+    },
+    {
+      "can_id": 118261760,
+      "can_id_hex": "0x70C6800",
+      "name": "BMS Information",
+      "description": "Extended frame containing ASCII text with hardware, firmware, and BMS type information",
+      "extended": true,
+      "period_ms": 1000,
+      "fields": [
+        {
+          "name": "bms_info",
+          "description": "ASCII string with hardware/firmware/BMS type (up to 8 characters)",
+          "byte_offset": 0,
+          "length": 8,
+          "data_type": "ascii",
+          "unit": "",
+          "scale": 1.0,
+          "offset": 0.0
         }
       ]
     },

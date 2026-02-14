@@ -499,22 +499,52 @@ class BatteryMonitor {
 
     // Parse pack identifier if available
     let packInfoHTML = "";
-    if (battery.pack_identifier) {
-      const packInfo = this.parsePackIdentifier(battery.pack_identifier);
-      if (packInfo) {
-        packInfoHTML = `
-                    <div class="battery-info">
+    if (battery.pack_identifier || battery.bms_info) {
+      let infoItems = "";
+      if (battery.pack_identifier) {
+        const packInfo = this.parsePackIdentifier(battery.pack_identifier);
+        if (packInfo) {
+          infoItems += `
                         <div class="info-item">
-                            <span class="info-icon">📅</span>
+                            <span class="info-label">Mfg:</span>
                             <span class="info-text">${packInfo.date}</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-icon">🔢</span>
-                            <span class="info-text">S/N: ${packInfo.serial}</span>
-                        </div>
-                    </div>
-                `;
+                            <span class="info-label">S/N:</span>
+                            <span class="info-text">${packInfo.serial}</span>
+                        </div>`;
+        }
       }
+      if (battery.bms_info) {
+        infoItems += `
+                        <div class="info-item">
+                            <span class="info-label">BMS:</span>
+                            <span class="info-text">${this.escapeHtml(battery.bms_info)}</span>
+                        </div>`;
+      }
+      if (infoItems) {
+        packInfoHTML = `<div class="battery-info">${infoItems}</div>`;
+      }
+    }
+
+    // SOC display with max_soc
+    const socValue = battery.soc || 0;
+    const maxSoc = battery.max_soc || 0;
+    const socDisplay = maxSoc > 0
+      ? `${socValue} / ${maxSoc}`
+      : `${socValue}`;
+
+    // Cell voltages display
+    let cellVoltagesHTML = "";
+    if (battery.cell_voltages && battery.cell_voltages.length > 0) {
+      const cells = battery.cell_voltages.map((mv, i) =>
+        `<div class="cell-voltage"><span class="cell-label">C${i + 1}</span><span class="cell-value">${mv}</span></div>`
+      ).join("");
+      cellVoltagesHTML = `
+            <div class="cell-voltages-section">
+                <div class="cell-voltages-header">Cell Voltages (mV)</div>
+                <div class="cell-voltages-grid">${cells}</div>
+            </div>`;
     }
 
     card.innerHTML = `
@@ -538,9 +568,10 @@ class BatteryMonitor {
                 </div>
                 <div class="metric">
                     <span class="metric-label">SOC</span>
-                    <span class="metric-value">${battery.soc || 0} <span class="metric-unit">%</span></span>
+                    <span class="metric-value">${socDisplay}</span>
                 </div>
             </div>
+            ${cellVoltagesHTML}
         `;
 
     return card;

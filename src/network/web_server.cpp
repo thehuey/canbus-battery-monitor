@@ -1103,14 +1103,26 @@ void WebServer::buildBatteryJSON(JsonObject obj, uint8_t id) {
     obj["current"] = battery->getCurrent();
     obj["power"] = battery->getPower();
     obj["soc"] = battery->getSOC();
+    obj["max_soc"] = battery->getMaxSOC();
     obj["temp1"] = battery->getTemp1();
     obj["temp2"] = battery->getTemp2();
     obj["status_flags"] = battery->getStatusFlags();
     obj["pack_identifier"] = battery->getPackIdentifier();
+    obj["bms_info"] = battery->getBmsInfo();
     obj["has_can_data"] = battery->hasCANData();
     obj["has_error"] = battery->hasError();
     obj["last_update"] = battery->getLastUpdate();
     obj["data_fresh"] = battery->isDataFresh(5000);
+
+    // Cell voltages
+    uint8_t cellCount = battery->getCellCount();
+    if (cellCount > 0) {
+        JsonArray cells = obj["cell_voltages"].to<JsonArray>();
+        const uint16_t* cellVolts = battery->getCellVoltages();
+        for (uint8_t c = 0; c < cellCount; c++) {
+            cells.add(cellVolts[c]);
+        }
+    }
 }
 
 void WebServer::buildAllBatteriesJSON(JsonObject obj) {
@@ -1130,9 +1142,21 @@ void WebServer::buildAllBatteriesJSON(JsonObject obj) {
             battObj["current"] = battery->getCurrent();
             battObj["power"] = battery->getPower();
             battObj["soc"] = battery->getSOC();
+            battObj["max_soc"] = battery->getMaxSOC();
             battObj["temp1"] = battery->getTemp1();
             battObj["temp2"] = battery->getTemp2();
             battObj["has_error"] = battery->hasError();
+            battObj["bms_info"] = battery->getBmsInfo();
+
+            // Cell voltages
+            uint8_t cellCount = battery->getCellCount();
+            if (cellCount > 0) {
+                JsonArray cells = battObj["cell_voltages"].to<JsonArray>();
+                const uint16_t* cellVolts = battery->getCellVoltages();
+                for (uint8_t c = 0; c < cellCount; c++) {
+                    cells.add(cellVolts[c]);
+                }
+            }
 
             total_power += battery->getPower();
             total_current += battery->getCurrent();
