@@ -73,72 +73,33 @@
     {
       "can_id": 515,
       "can_id_hex": "0x203",
-      "name": "Remaining Capacity and Max Capacity",
-      "description": "Pack current Ah and max capacity",
+      "name": "State of Charge",
+      "description": "Current SOC and maximum SOC capacity",
       "period_ms": 50,
       "fields": [
         {
-          "name": "remaining_milliamp_hours",
-          "description": "Remaining capacity in milliamp-hours",
+          "name": "soc",
+          "description": "Current state of charge",
           "byte_offset": 0,
           "length": 2,
           "data_type": "uint16_le",
-          "unit": "mAh",
+          "unit": "",
           "scale": 1.0,
           "offset": 0.0,
           "min_value": 0,
-          "max_value": 255
+          "max_value": 65535
         },
         {
-          "name": "unknown_byte_1",
-          "description": "Unknown byte",
-          "byte_offset": 1,
-          "length": 1,
-          "data_type": "uint8",
-          "unit": null,
-          "scale": 1.0,
-          "offset": 0.0,
-          "min_value": null,
-          "max_value": null
-        },
-        {
-          "name": "cell_voltage_1",
-          "description": "First cell voltage in this message",
-          "byte_offset": 2,
-          "length": 2,
-          "data_type": "uint16_le",
-          "unit": "mV",
-          "scale": 1.0,
-          "offset": 0.0,
-          "min_value": 3000,
-          "max_value": 4200,
-          "note": "May be individual cell voltage - needs validation"
-        },
-        {
-          "name": "cell_voltage_2",
-          "description": "Second cell voltage in this message",
+          "name": "max_soc",
+          "description": "Maximum state of charge capacity",
           "byte_offset": 4,
           "length": 2,
           "data_type": "uint16_le",
-          "unit": "mV",
+          "unit": "",
           "scale": 1.0,
           "offset": 0.0,
-          "min_value": 3000,
-          "max_value": 4200,
-          "note": "May be individual cell voltage - needs validation"
-        },
-        {
-          "name": "cell_voltage_3",
-          "description": "Third cell voltage in this message",
-          "byte_offset": 6,
-          "length": 2,
-          "data_type": "uint16_le",
-          "unit": "mV",
-          "scale": 1.0,
-          "offset": 0.0,
-          "min_value": 3000,
-          "max_value": 4200,
-          "note": "May be individual cell voltage - needs validation"
+          "min_value": 0,
+          "max_value": 65535
         }
       ]
     },
