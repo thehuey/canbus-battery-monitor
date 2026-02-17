@@ -301,6 +301,58 @@ class DevTools {
     }
     return bytes;
   }
+
+  // Parse batch message format
+  // Expected format: "ID:0xXXXX DLC:N DATA:HHHHH" (one per line)
+  parseBatchMessages(input) {
+    const messages = [];
+    const lines = input.trim().split('\n').filter(line => line.trim().length > 0);
+
+    for (const line of lines) {
+      const match = line.match(/ID:([0-9A-Fa-fx]+)\s+DLC:(\d+)\s+DATA:([\s0-9A-Fa-f]+)/i);
+      if (!match) {
+        throw new Error(`Invalid format on line: "${line}"\nExpected: ID:0xXXXX DLC:N DATA:HHHHH`);
+      }
+
+      const id = match[1];
+      const dlc = parseInt(match[2], 10);
+      const dataStr = match[3];
+
+      if (dlc < 0 || dlc > 8) {
+        throw new Error(`Invalid DLC: ${dlc} (must be 0-8)`);
+      }
+
+      messages.push({
+        idStr: id,
+        dlc: dlc,
+        dataStr: dataStr
+      });
+    }
+
+    return messages;
+  }
+
+  // Send batch of messages with delays between them
+  async sendBatchMessages(messages, intervalMs = 100, onProgress = null) {
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      try {
+        this.sendCANMessage(msg.idStr, msg.dlc, msg.dataStr);
+
+        if (onProgress) {
+          onProgress(i + 1, messages.length, msg);
+        }
+
+        // Delay before next message (except after the last one)
+        if (i < messages.length - 1 && intervalMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+      } catch (error) {
+        console.error(`[DevTools] Failed to send message ${i}:`, error);
+        throw new Error(`Message ${i + 1}: ${error.message}`);
+      }
+    }
+  }
 }
 
 // Export to global scope

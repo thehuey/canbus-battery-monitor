@@ -147,6 +147,28 @@
             <div id="devSendStatus" class="dev-status"></div>
           </div>
 
+          <!-- Batch Send Messages -->
+          <div class="dev-section">
+            <h3>Send Multiple Messages</h3>
+            <div class="dev-form">
+              <div class="form-row">
+                <label style="flex: 1">
+                  Format: ID:0xXXXX DLC:N DATA:HHHHH (one per line)
+                  <textarea id="devBatchMessages" placeholder="ID:0x100 DLC:8 DATA:00 00 00 00 00 00 00 00&#10;ID:0x101 DLC:8 DATA:FF FF FF FF FF FF FF FF" rows="4"></textarea>
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  Interval (ms):
+                  <input type="number" id="devBatchInterval" min="0" max="10000" value="100" style="width: 100px;" />
+                </label>
+                <button class="btn btn-primary" id="devBatchSendBtn">Send Batch</button>
+                <button class="btn btn-sm" id="devBatchClearBtn">Clear</button>
+              </div>
+            </div>
+            <div id="devBatchStatus" class="dev-status"></div>
+          </div>
+
           <!-- Send History -->
           <div class="dev-section" id="devHistorySection" style="display:none">
             <h3>Send History</h3>

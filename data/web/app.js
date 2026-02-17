@@ -239,6 +239,21 @@ class BatteryMonitor {
         this.clearSendHistory();
       });
     }
+
+    // Developer Tools - Batch Send
+    const batchSendBtn = document.getElementById("devBatchSendBtn");
+    if (batchSendBtn) {
+      batchSendBtn.addEventListener("click", () => {
+        this.sendBatchMessages();
+      });
+    }
+
+    const batchClearBtn = document.getElementById("devBatchClearBtn");
+    if (batchClearBtn) {
+      batchClearBtn.addEventListener("click", () => {
+        document.getElementById("devBatchMessages").value = "";
+      });
+    }
   }
 
   // WebSocket Management
@@ -1292,6 +1307,52 @@ class BatteryMonitor {
       statusEl.className = "dev-status error";
 
       this.showToast(`Send failed: ${error.message}`, "error");
+    }
+  }
+
+  // Send batch of CAN messages
+  async sendBatchMessages() {
+    if (!this.devTools) {
+      this.showToast("DevTools not available", "error");
+      return;
+    }
+
+    const batchInput = document.getElementById("devBatchMessages");
+    const intervalInput = document.getElementById("devBatchInterval");
+    const statusEl = document.getElementById("devBatchStatus");
+
+    if (!batchInput.value.trim()) {
+      statusEl.textContent = "⚠ No messages to send";
+      statusEl.className = "dev-status warning";
+      return;
+    }
+
+    try {
+      // Parse batch messages
+      const messages = this.devTools.parseBatchMessages(batchInput.value);
+      const interval = parseInt(intervalInput.value) || 0;
+
+      statusEl.textContent = `Sending ${messages.length} message(s)...`;
+      statusEl.className = "dev-status info";
+
+      // Send with progress callback
+      await this.devTools.sendBatchMessages(messages, interval, (current, total, msg) => {
+        const idPad = msg.extended ? 8 : 3;
+        const idHex = msg.idStr.replace(/^0x/, '').toUpperCase().padStart(idPad, '0');
+        statusEl.textContent = `Sent ${current}/${total}: ID=0x${idHex} DLC=${msg.dlc}`;
+      });
+
+      statusEl.textContent = `✓ Successfully sent ${messages.length} message(s)`;
+      statusEl.className = "dev-status success";
+      this.showToast(`Batch sent: ${messages.length} messages`, "success");
+
+      setTimeout(() => {
+        statusEl.className = "dev-status";
+      }, 4000);
+    } catch (error) {
+      statusEl.textContent = `✗ Error: ${error.message}`;
+      statusEl.className = "dev-status error";
+      this.showToast(`Batch send failed: ${error.message}`, "error");
     }
   }
 
