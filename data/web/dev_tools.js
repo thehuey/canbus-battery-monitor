@@ -1,4 +1,4 @@
-// Developer Tools - CAN message sending with extended frame support
+// Developer Tools - CAN message sending with extended frame support and history persistence
 // Supports standard (11-bit, 0x000-0x7FF) and extended (29-bit, 0x00000000-0x1FFFFFFF) CAN IDs
 
 class DevTools {
@@ -6,6 +6,7 @@ class DevTools {
     this.ws = null;
     this.history = [];
     this.maxHistory = 50;
+    this.loadHistory();
   }
 
   setWebSocket(ws) {
@@ -79,12 +80,22 @@ class DevTools {
       timestamp: Date.now(),
     };
 
-    this.history.unshift(entry);
-    if (this.history.length > this.maxHistory) {
-      this.history.pop();
-    }
+    this.addToHistory(entry);
 
     return entry;
+  }
+
+  // Add message to history and persist to localStorage
+  addToHistory(message) {
+    this.history.unshift(message);
+
+    // Limit history size
+    if (this.history.length > this.maxHistory) {
+      this.history = this.history.slice(0, this.maxHistory);
+    }
+
+    // Save to localStorage
+    this.saveHistory();
   }
 
   /**
@@ -117,6 +128,34 @@ class DevTools {
 
   getHistory() {
     return this.history;
+  }
+
+  // Clear history and localStorage
+  clearHistory() {
+    this.history = [];
+    this.saveHistory();
+  }
+
+  // Save history to localStorage
+  saveHistory() {
+    try {
+      localStorage.setItem('can_send_history', JSON.stringify(this.history));
+    } catch (e) {
+      console.warn('[DevTools] Failed to save history:', e);
+    }
+  }
+
+  // Load history from localStorage
+  loadHistory() {
+    try {
+      const saved = localStorage.getItem('can_send_history');
+      if (saved) {
+        this.history = JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('[DevTools] Failed to load history:', e);
+      this.history = [];
+    }
   }
 
   formatMessage(msg) {
@@ -154,8 +193,95 @@ class DevTools {
     return this.sendCANMessage(idStr, msg.dlc, dataStr, msg.extended);
   }
 
-  clearHistory() {
-    this.history = [];
+  // Export history as JSON
+  exportHistory() {
+    return {
+      version: 1,
+      exportedAt: Date.now(),
+      history: this.history
+    };
+  }
+
+  // Import history from JSON
+  importHistory(data) {
+    if (!data || !data.history) {
+      throw new Error('Invalid import data');
+    }
+
+    this.history = data.history.slice(0, this.maxHistory);
+    this.saveHistory();
+    return true;
+  }
+
+  // Create a test sequence of messages
+  createTestSequence(baseId, count, interval = 100) {
+    const sequence = [];
+    for (let i = 0; i < count; i++) {
+      sequence.push({
+        id: baseId + i,
+        dlc: 8,
+        data: [0xAA, 0xBB, 0xCC, 0xDD, i & 0xFF, (i >> 8) & 0xFF, 0xEE, 0xFF],
+        delay: interval
+      });
+    }
+    return sequence;
+  }
+
+  // Send a sequence of messages with delays
+  async sendSequence(sequence, onProgress) {
+    for (let i = 0; i < sequence.length; i++) {
+      const msg = sequence[i];
+
+      try {
+        const idStr = '0x' + msg.id.toString(16).toUpperCase();
+        const dataStr = msg.data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+        this.sendCANMessage(idStr, msg.dlc, dataStr, msg.extended);
+
+        if (onProgress) {
+          onProgress(i + 1, sequence.length, msg);
+        }
+
+        if (msg.delay && i < sequence.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, msg.delay));
+        }
+      } catch (error) {
+        console.error(`[DevTools] Failed to send message ${i}:`, error);
+        throw error;
+      }
+    }
+  }
+
+  // Parse CAN data from various formats
+  parseData(input, dlc) {
+    // Auto-detect format and convert to byte array
+    const trimmed = input.trim();
+
+    // Hex format: "01 02 03 04" or "01020304"
+    if (/^[0-9A-Fa-f\s]+$/.test(trimmed)) {
+      const cleanHex = trimmed.replace(/\s+/g, '');
+      const bytes = [];
+      for (let i = 0; i < cleanHex.length && i < dlc * 2; i += 2) {
+        bytes.push(parseInt(cleanHex.substr(i, 2), 16));
+      }
+      return bytes;
+    }
+
+    // Decimal format: "1,2,3,4" or "1 2 3 4"
+    if (/^[0-9\s,]+$/.test(trimmed)) {
+      const parts = trimmed.split(/[\s,]+/).filter(p => p.length > 0);
+      return parts.slice(0, dlc).map(p => parseInt(p, 10) & 0xFF);
+    }
+
+    // ASCII format: "Hello" (convert to bytes)
+    const bytes = [];
+    for (let i = 0; i < trimmed.length && i < dlc; i++) {
+      bytes.push(trimmed.charCodeAt(i) & 0xFF);
+    }
+    // Pad with zeros if needed
+    while (bytes.length < dlc) {
+      bytes.push(0);
+    }
+    return bytes;
   }
 }
 
