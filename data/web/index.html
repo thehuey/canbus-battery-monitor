@@ -13,6 +13,7 @@
     />
     <title>eBike Monitor</title>
     <link rel="stylesheet" href="style.css" />
+    <script src="protocol_manager.js"></script>
     <script src="can_analyzer.js"></script>
     <script src="dev_tools.js"></script>
   </head>
@@ -284,6 +285,23 @@
                 </div>
                 <button type="submit" class="btn btn-primary">
                   Save MQTT Settings
+                </button>
+              </form>
+            </div>
+
+            <!-- Protocol Selection -->
+            <div class="settings-section">
+              <h3>Protocol Configuration</h3>
+              <form id="protocolForm">
+                <div class="form-group">
+                  <label for="protocolSelect">Select Protocol for Battery Data</label>
+                  <select id="protocolSelect" name="protocol">
+                    <option value="">Loading protocols...</option>
+                  </select>
+                  <small class="form-help">Choose the protocol that matches your battery pack to parse CAN messages</small>
+                </div>
+                <button type="button" class="btn btn-primary" id="saveProtocolBtn">
+                  Set Active Protocol
                 </button>
               </form>
             </div>

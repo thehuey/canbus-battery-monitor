@@ -21,6 +21,9 @@ class BatteryMonitor {
     this.canAnalyzer = null;
     this.statsDecodeMode = 'hex';
 
+    // Protocol Manager (browser-side CAN message parsing)
+    this.protocolManager = null;
+
     // Developer Tools (message sending)
     this.devTools = null;
 
@@ -28,6 +31,14 @@ class BatteryMonitor {
   }
 
   async init() {
+    // Initialize Protocol Manager (browser-side CAN parsing)
+    if (window.ProtocolManager) {
+      this.protocolManager = new window.ProtocolManager();
+      await this.protocolManager.ready;
+      console.debug("[App] Protocol Manager initialized");
+      this.updateProtocolList();
+    }
+
     // Initialize CAN Analyzer (wait for IndexedDB)
     if (window.CANAnalyzer) {
       this.canAnalyzer = new window.CANAnalyzer();
@@ -259,6 +270,54 @@ class BatteryMonitor {
       batchClearBtn.addEventListener("click", () => {
         document.getElementById("devBatchMessages").value = "";
       });
+    }
+
+    // Protocol selection button
+    const saveProtocolBtn = document.getElementById("saveProtocolBtn");
+    if (saveProtocolBtn) {
+      saveProtocolBtn.addEventListener("click", () => {
+        const select = document.getElementById("protocolSelect");
+        if (select.value) {
+          this.setActiveProtocol(select.value);
+        }
+      });
+    }
+  }
+
+  // Update protocol list in settings
+  updateProtocolList() {
+    if (!this.protocolManager) return;
+
+    const select = document.getElementById("protocolSelect");
+    if (!select) return;
+
+    const protocols = this.protocolManager.getAvailableProtocols();
+    select.innerHTML = "";
+
+    for (const proto of protocols) {
+      const option = document.createElement("option");
+      option.value = proto.id;
+      option.textContent = `${proto.name} (${proto.manufacturer})`;
+      select.appendChild(option);
+    }
+
+    // Select the first one by default
+    if (protocols.length > 0) {
+      select.value = protocols[0].id;
+    }
+  }
+
+  // Set active protocol
+  setActiveProtocol(protocolId) {
+    if (!this.protocolManager) {
+      this.showToast("Protocol manager not initialized", "error");
+      return;
+    }
+
+    if (this.protocolManager.setActiveProtocol(protocolId)) {
+      this.showToast(`Protocol set to: ${this.protocolManager.activeProtocol.name}`, "success");
+    } else {
+      this.showToast("Failed to set protocol", "error");
     }
   }
 
