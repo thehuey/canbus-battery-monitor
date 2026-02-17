@@ -100,7 +100,10 @@ class DevTools {
 
   /**
    * Parse hex data string into byte array
-   * @param {string} dataStr - Hex bytes separated by spaces (e.g. "01 02 AB FF")
+   * Supports both formats:
+   * - Separated: "01 02 AB FF" or "01,02,AB,FF"
+   * - Continuous: "0102ABFF"
+   * @param {string} dataStr - Hex bytes
    * @param {number} dlc - Expected number of bytes
    * @returns {Uint8Array}
    */
@@ -111,16 +114,31 @@ class DevTools {
       return bytes;
     }
 
-    // Remove common separators and parse hex pairs
-    const cleaned = dataStr.replace(/[,\s]+/g, " ").trim();
-    const parts = cleaned.split(" ").filter((s) => s.length > 0);
+    const trimmed = dataStr.trim();
 
-    for (let i = 0; i < Math.min(parts.length, dlc); i++) {
-      const val = parseInt(parts[i], 16);
-      if (isNaN(val) || val < 0 || val > 255) {
-        throw new Error(`Invalid data byte at position ${i}: "${parts[i]}"`);
+    // Try space/comma separated format first
+    if (/[\s,]/.test(trimmed)) {
+      const parts = trimmed.split(/[\s,]+/).filter((s) => s.length > 0);
+      for (let i = 0; i < Math.min(parts.length, dlc); i++) {
+        const val = parseInt(parts[i], 16);
+        if (isNaN(val) || val < 0 || val > 255) {
+          throw new Error(`Invalid data byte at position ${i}: "${parts[i]}"`);
+        }
+        bytes[i] = val;
       }
-      bytes[i] = val;
+    } else {
+      // Continuous hex string format: parse in pairs
+      const cleanHex = trimmed.replace(/\s+/g, '');
+      if (!/^[0-9A-Fa-f]*$/.test(cleanHex)) {
+        throw new Error(`Invalid hex data: "${trimmed}"`);
+      }
+      if (cleanHex.length !== dlc * 2) {
+        throw new Error(`Data length mismatch: expected ${dlc * 2} hex chars, got ${cleanHex.length}`);
+      }
+      for (let i = 0; i < cleanHex.length; i += 2) {
+        const val = parseInt(cleanHex.substr(i, 2), 16);
+        bytes[i / 2] = val;
+      }
     }
 
     return bytes;
