@@ -14,6 +14,7 @@ class BatteryMonitor {
       messageCount: 0,
       maxMessages: 1000,
       filter: null,
+      excludeList: [], // Array of IDs to exclude (lowercase for comparison)
     };
 
     // CAN Analyzer (IndexedDB + statistics)
@@ -139,6 +140,11 @@ class BatteryMonitor {
 
     document.getElementById("canFilterInput").addEventListener("input", (e) => {
       this.setCANFilter(e.target.value.trim());
+    });
+
+    // CAN Exclude filter
+    document.getElementById("canExcludeInput").addEventListener("input", (e) => {
+      this.setCANExcludeFilter(e.target.value.trim());
     });
 
     // CAN Stats button
@@ -949,11 +955,17 @@ class BatteryMonitor {
 
     if (this.canMonitor.paused) return;
 
-    // Apply filter if set
+    // Apply include filter if set
     if (this.canMonitor.filter) {
       const msgId = message.id.toLowerCase();
       const filter = this.canMonitor.filter.toLowerCase();
       if (!msgId.includes(filter)) return;
+    }
+
+    // Apply exclude filter if set
+    if (this.canMonitor.excludeList.length > 0) {
+      const msgId = message.id.toLowerCase();
+      if (this.canMonitor.excludeList.includes(msgId)) return;
     }
 
     const viewer = document.getElementById("canLogViewer");
@@ -1041,6 +1053,21 @@ class BatteryMonitor {
   setCANFilter(value) {
     this.canMonitor.filter = value || null;
     console.debug(`CAN filter ${value ? "set to: " + value : "cleared"}`);
+  }
+
+  setCANExcludeFilter(value) {
+    // Parse comma-separated list of IDs to exclude
+    if (value) {
+      // Split by comma, normalize to lowercase, remove spaces
+      this.canMonitor.excludeList = value
+        .split(',')
+        .map(id => id.trim().toLowerCase())
+        .filter(id => id.length > 0);
+      console.debug(`CAN exclude filter set to: ${this.canMonitor.excludeList.join(', ')}`);
+    } else {
+      this.canMonitor.excludeList = [];
+      console.debug("CAN exclude filter cleared");
+    }
   }
 
   // ASCII detection is now handled inline by the analyzer.
