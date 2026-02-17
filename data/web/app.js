@@ -972,11 +972,9 @@ class BatteryMonitor {
     // Append to viewer
     viewer.value += line;
 
-    // Update counter
-    this.canMonitor.messageCount++;
-    document.getElementById("canMessageCount").textContent = this.formatNumber(
-      this.canMonitor.messageCount,
-    );
+    // Note: Do NOT increment local counter - use server's official count instead
+    // The server sends the authoritative message count from the logger every 5 seconds
+    // Incrementing locally causes "jumping chunks" when server updates override local count
 
     // Limit total lines to prevent memory issues
     const lines = viewer.value.split("\n");
