@@ -16,17 +16,7 @@ class ProtocolManager {
 
       console.debug('[ProtocolManager] Available protocols:', data);
 
-      // Load built-in protocols
-      if (data.builtin) {
-        for (const proto of data.builtin) {
-          const protoData = await this.loadProtocol(`builtin_${proto.id}`);
-          if (protoData) {
-            this.protocols[`builtin_${proto.id}`] = protoData;
-          }
-        }
-      }
-
-      // Load custom protocols if any
+      // Load protocol JSON files listed by the API
       if (data.custom) {
         for (const proto of data.custom) {
           const protoData = await this.loadProtocol(proto.filename);
@@ -36,12 +26,13 @@ class ProtocolManager {
         }
       }
 
-      // Set default protocol to first built-in
-      if (data.builtin && data.builtin.length > 0) {
-        this.setActiveProtocol(`builtin_0`);
+      // Auto-select first protocol if available
+      const keys = Object.keys(this.protocols);
+      if (keys.length > 0) {
+        this.setActiveProtocol(keys[0]);
       }
 
-      console.debug('[ProtocolManager] Initialized with protocols:', Object.keys(this.protocols));
+      console.debug('[ProtocolManager] Initialized with protocols:', keys);
       return true;
     } catch (error) {
       console.error('[ProtocolManager] Failed to load protocols:', error);

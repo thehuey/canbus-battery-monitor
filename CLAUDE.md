@@ -508,3 +508,108 @@ Track observed but undecoded message IDs here for future analysis:
 - **NVS**: Non-Volatile Storage, ESP32's key-value flash storage
 - **SPIFFS**: SPI Flash File System
 - **MQTT**: Message Queuing Telemetry Transport, lightweight pub/sub protocol
+
+---
+
+## Architecture Decisions & Lessons Learned
+
+### Browser-Side Protocol Parsing (not firmware)
+
+Protocol parsing for CAN messages runs entirely in the browser, NOT on the ESP32. This was a deliberate architectural decision after discovering that adding protocol parsing endpoints to the firmware caused a **DRAM segment overflow (~21KB over)**. The ESP32 has very limited RAM and the protocol structures are large.
+
+**How it works:**
+1. Protocol JSON files live in `data/protocols/` on SPIFFS
+2. Firmware serves them via `GET /api/protocols` (list) and `GET /api/protocols/<filename>` (fetch)
+3. `protocol_manager.js` in the browser loads, indexes, and parses CAN messages client-side
+4. The browser maps parsed fields to battery data (SOC, voltage, current, etc.)
+
+**Key files:**
+- `data/web/protocol_manager.js` — Browser-side protocol loading, parsing, and field extraction
+- `data/protocols/dpower_48v_13s.json` — D-power 48V 13S battery protocol definition
+- `data/protocols/generic_bms.json` — Generic BMS protocol definition
+- `src/can/protocol.h` — Protocol struct definitions (used firmware-side for built-in protocols)
+- `src/can/builtin_protocols.h/.cpp` — Compiled-in protocol definitions (DPOWER_48V_13S, GENERIC_BMS)
+- `src/can/protocol_loader.h` — SPIFFS protocol file loader with `listCustomProtocols()`
+
+### Web Server Static File Serving
+
+The web server uses a **single wildcard `serveStatic()` call** instead of individual per-file routes:
+
+```cpp
+server_.serveStatic("/protocols/", SPIFFS, "/protocols/");
+server_.serveStatic("/", SPIFFS, "/web/");
+```
+
+This means:
+- **Any file added to `data/web/`** is automatically served at the root path (e.g., `/app.js`, `/style.css`)
+- **Any file added to `data/protocols/`** is accessible at `/protocols/<filename>`
+- **No firmware code changes needed** when adding new web files or protocol definitions — just `pio run --target uploadfs`
+- The `/protocols/` route is registered BEFORE the `/` catch-all so it takes priority
+
+### CAN Message Batching
+
+WebSocket CAN messages are batched to prevent client disconnects. The firmware buffers up to 25 CAN messages and flushes periodically, sending them as a JSON array rather than individual frames. This prevents WebSocket queue overflow on busy CAN buses.
+
+### ESP32 Memory Constraints
+
+- **DRAM is extremely limited** (~320KB total, ~37.9% used currently)
+- Protocol struct `Definition` with 8 messages × 8 fields is very large in static allocation
+- Always prefer browser-side processing over firmware for anything the browser can handle
+- Use `constexpr` sizes and static allocation — avoid dynamic allocation where possible
+- Monitor RAM usage: `pio run` shows RAM percentage in build output
+
+### CAN Bus Monitor Features
+
+The web UI CAN bus monitor (`app.js`, `dev_tools.js`) supports:
+- **Include filter**: Show only specific CAN IDs (comma-separated)
+- **Exclude filter**: Hide specific CAN IDs (comma-separated)
+- **Extended CAN IDs**: Both standard (11-bit, 0x000-0x7FF) and extended (29-bit, 0x00000000-0x1FFFFFFF)
+- **Batch message sender**: Send multiple CAN messages from a textarea, one per line
+- **Hex data formats**: Both space-separated (`A2 00 00 00`) and continuous (`A2000000A2`)
+- **localStorage persistence**: Dev tools history persists across browser sessions
+- **Message counter**: Uses server-side authoritative count only (not local JS counter) to prevent overcounting
+
+### Web UI File Structure
+
+```
+data/
+├── web/                    # Served at / (root path)
+│   ├── index.html          # Main dashboard SPA
+│   ├── app.js              # Core frontend logic, WebSocket handling
+│   ├── style.css           # Styling
+│   ├── dev_tools.js        # CAN message sender, batch tools
+│   ├── can_analyzer.js     # CAN analysis utilities
+│   ├── protocol_manager.js # Browser-side protocol parsing
+│   └── FEATURES.md         # Feature documentation
+├── protocols/              # Served at /protocols/
+│   ├── dpower_48v_13s.json # D-power battery protocol
+│   ├── generic_bms.json    # Generic BMS protocol
+│   └── SCHEMA.md           # Protocol JSON schema docs
+```
+
+### Build & Deploy
+
+```bash
+# PlatformIO binary location in dev container:
+/home/node/.platformio/penv/bin/pio
+
+# Build firmware
+pio run
+
+# Upload firmware only
+pio run --target upload
+
+# Upload web files and protocol definitions (SPIFFS filesystem)
+pio run --target uploadfs
+
+# Both (firmware changes + new web files)
+pio run --target upload && pio run --target uploadfs
+```
+
+### Common Pitfalls
+
+1. **New web files return 404**: No longer an issue — wildcard `serveStatic("/", SPIFFS, "/web/")` serves all files. But you still need to `uploadfs` to get them onto the device.
+2. **Message counter jumping in chunks**: Fixed by removing local JS counter — only use server's authoritative count from `can_logger_`.
+3. **DRAM overflow on new features**: Before adding firmware features, check build output for RAM%. If close to limit, consider browser-side implementation instead.
+4. **Hex data parsing errors**: `parseDataBytes()` in `dev_tools.js` handles both space-separated and continuous hex formats.
+5. **Protocol not loading in browser**: Check browser console for fetch errors. The `/api/protocols` endpoint must return valid JSON listing available files, and each file must be accessible at `/api/protocols/<filename>`.
