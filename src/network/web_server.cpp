@@ -282,14 +282,13 @@ void WebServer::setupStaticFiles() {
         request->send(200, "text/html", html);
     });
 
-    // Serve specific static files (JS, CSS, etc.) from /web directory
-    server_.serveStatic("/app.js", SPIFFS, "/web/app.js");
-    server_.serveStatic("/style.css", SPIFFS, "/web/style.css");
-    server_.serveStatic("/dev_tools.js", SPIFFS, "/web/dev_tools.js");
-    server_.serveStatic("/can_analyzer.js", SPIFFS, "/web/can_analyzer.js");
+    // Serve protocol JSON files from /protocols/ directory on SPIFFS
+    server_.serveStatic("/protocols/", SPIFFS, "/protocols/");
 
-    // Serve all files from /static/ path for debugging
-    server_.serveStatic("/static/", SPIFFS, "/");
+    // Serve all files from /web/ directory on SPIFFS at the root path
+    // Any file in data/web/ is automatically available (e.g., /app.js, /style.css)
+    // No need to add individual serveStatic() calls when adding new files
+    server_.serveStatic("/", SPIFFS, "/web/");
 
     LOG_INFO("[WebServer] Static file handlers registered");
 }
@@ -386,6 +385,44 @@ void WebServer::setupAPIEndpoints() {
     server_.on("/api/can/diagnostics", HTTP_GET, [this](AsyncWebServerRequest* request) {
         request_count_++;
         handleGetCANDiagnostics(request);
+    });
+
+    // GET /api/protocols - List available protocol files from SPIFFS
+    server_.on("/api/protocols", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        JsonDocument doc;
+        JsonArray custom = doc["custom"].to<JsonArray>();
+
+        File dir = SPIFFS.open("/protocols");
+        if (dir && dir.isDirectory()) {
+            File file = dir.openNextFile();
+            while (file) {
+                const char* name = file.name();
+                // Only list .json files
+                if (strstr(name, ".json")) {
+                    JsonObject entry = custom.add<JsonObject>();
+                    // Extract just the filename from the full path
+                    const char* slash = strrchr(name, '/');
+                    entry["filename"] = slash ? (slash + 1) : name;
+                    entry["size"] = file.size();
+                }
+                file = dir.openNextFile();
+            }
+        }
+
+        sendJSON(request, doc);
+    });
+
+    // GET /api/protocols/<filename> - Serve a protocol JSON file directly
+    server_.on("^\\/api\\/protocols\\/(.+\\.json)$", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request_count_++;
+        String filename = "/protocols/" + request->pathArg(0);
+
+        if (SPIFFS.exists(filename)) {
+            request->send(SPIFFS, filename, "application/json");
+        } else {
+            sendError(request, 404, "Protocol not found");
+        }
     });
 
     // Handle 404

@@ -1,4 +1,4 @@
-// Developer Tools - CAN message sending with extended frame support
+// Developer Tools - CAN message sending with extended frame support and history persistence
 // Supports standard (11-bit, 0x000-0x7FF) and extended (29-bit, 0x00000000-0x1FFFFFFF) CAN IDs
 
 class DevTools {
@@ -6,6 +6,7 @@ class DevTools {
     this.ws = null;
     this.history = [];
     this.maxHistory = 50;
+    this.loadHistory();
   }
 
   setWebSocket(ws) {
@@ -79,17 +80,30 @@ class DevTools {
       timestamp: Date.now(),
     };
 
-    this.history.unshift(entry);
-    if (this.history.length > this.maxHistory) {
-      this.history.pop();
-    }
+    this.addToHistory(entry);
 
     return entry;
   }
 
+  // Add message to history and persist to localStorage
+  addToHistory(message) {
+    this.history.unshift(message);
+
+    // Limit history size
+    if (this.history.length > this.maxHistory) {
+      this.history = this.history.slice(0, this.maxHistory);
+    }
+
+    // Save to localStorage
+    this.saveHistory();
+  }
+
   /**
    * Parse hex data string into byte array
-   * @param {string} dataStr - Hex bytes separated by spaces (e.g. "01 02 AB FF")
+   * Supports both formats:
+   * - Separated: "01 02 AB FF" or "01,02,AB,FF"
+   * - Continuous: "0102ABFF"
+   * @param {string} dataStr - Hex bytes
    * @param {number} dlc - Expected number of bytes
    * @returns {Uint8Array}
    */
@@ -100,16 +114,31 @@ class DevTools {
       return bytes;
     }
 
-    // Remove common separators and parse hex pairs
-    const cleaned = dataStr.replace(/[,\s]+/g, " ").trim();
-    const parts = cleaned.split(" ").filter((s) => s.length > 0);
+    const trimmed = dataStr.trim();
 
-    for (let i = 0; i < Math.min(parts.length, dlc); i++) {
-      const val = parseInt(parts[i], 16);
-      if (isNaN(val) || val < 0 || val > 255) {
-        throw new Error(`Invalid data byte at position ${i}: "${parts[i]}"`);
+    // Try space/comma separated format first
+    if (/[\s,]/.test(trimmed)) {
+      const parts = trimmed.split(/[\s,]+/).filter((s) => s.length > 0);
+      for (let i = 0; i < Math.min(parts.length, dlc); i++) {
+        const val = parseInt(parts[i], 16);
+        if (isNaN(val) || val < 0 || val > 255) {
+          throw new Error(`Invalid data byte at position ${i}: "${parts[i]}"`);
+        }
+        bytes[i] = val;
       }
-      bytes[i] = val;
+    } else {
+      // Continuous hex string format: parse in pairs
+      const cleanHex = trimmed.replace(/\s+/g, '');
+      if (!/^[0-9A-Fa-f]*$/.test(cleanHex)) {
+        throw new Error(`Invalid hex data: "${trimmed}"`);
+      }
+      if (cleanHex.length !== dlc * 2) {
+        throw new Error(`Data length mismatch: expected ${dlc * 2} hex chars, got ${cleanHex.length}`);
+      }
+      for (let i = 0; i < cleanHex.length; i += 2) {
+        const val = parseInt(cleanHex.substr(i, 2), 16);
+        bytes[i / 2] = val;
+      }
     }
 
     return bytes;
@@ -117,6 +146,34 @@ class DevTools {
 
   getHistory() {
     return this.history;
+  }
+
+  // Clear history and localStorage
+  clearHistory() {
+    this.history = [];
+    this.saveHistory();
+  }
+
+  // Save history to localStorage
+  saveHistory() {
+    try {
+      localStorage.setItem('can_send_history', JSON.stringify(this.history));
+    } catch (e) {
+      console.warn('[DevTools] Failed to save history:', e);
+    }
+  }
+
+  // Load history from localStorage
+  loadHistory() {
+    try {
+      const saved = localStorage.getItem('can_send_history');
+      if (saved) {
+        this.history = JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('[DevTools] Failed to load history:', e);
+      this.history = [];
+    }
   }
 
   formatMessage(msg) {
@@ -154,8 +211,147 @@ class DevTools {
     return this.sendCANMessage(idStr, msg.dlc, dataStr, msg.extended);
   }
 
-  clearHistory() {
-    this.history = [];
+  // Export history as JSON
+  exportHistory() {
+    return {
+      version: 1,
+      exportedAt: Date.now(),
+      history: this.history
+    };
+  }
+
+  // Import history from JSON
+  importHistory(data) {
+    if (!data || !data.history) {
+      throw new Error('Invalid import data');
+    }
+
+    this.history = data.history.slice(0, this.maxHistory);
+    this.saveHistory();
+    return true;
+  }
+
+  // Create a test sequence of messages
+  createTestSequence(baseId, count, interval = 100) {
+    const sequence = [];
+    for (let i = 0; i < count; i++) {
+      sequence.push({
+        id: baseId + i,
+        dlc: 8,
+        data: [0xAA, 0xBB, 0xCC, 0xDD, i & 0xFF, (i >> 8) & 0xFF, 0xEE, 0xFF],
+        delay: interval
+      });
+    }
+    return sequence;
+  }
+
+  // Send a sequence of messages with delays
+  async sendSequence(sequence, onProgress) {
+    for (let i = 0; i < sequence.length; i++) {
+      const msg = sequence[i];
+
+      try {
+        const idStr = '0x' + msg.id.toString(16).toUpperCase();
+        const dataStr = msg.data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+        this.sendCANMessage(idStr, msg.dlc, dataStr, msg.extended);
+
+        if (onProgress) {
+          onProgress(i + 1, sequence.length, msg);
+        }
+
+        if (msg.delay && i < sequence.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, msg.delay));
+        }
+      } catch (error) {
+        console.error(`[DevTools] Failed to send message ${i}:`, error);
+        throw error;
+      }
+    }
+  }
+
+  // Parse CAN data from various formats
+  parseData(input, dlc) {
+    // Auto-detect format and convert to byte array
+    const trimmed = input.trim();
+
+    // Hex format: "01 02 03 04" or "01020304"
+    if (/^[0-9A-Fa-f\s]+$/.test(trimmed)) {
+      const cleanHex = trimmed.replace(/\s+/g, '');
+      const bytes = [];
+      for (let i = 0; i < cleanHex.length && i < dlc * 2; i += 2) {
+        bytes.push(parseInt(cleanHex.substr(i, 2), 16));
+      }
+      return bytes;
+    }
+
+    // Decimal format: "1,2,3,4" or "1 2 3 4"
+    if (/^[0-9\s,]+$/.test(trimmed)) {
+      const parts = trimmed.split(/[\s,]+/).filter(p => p.length > 0);
+      return parts.slice(0, dlc).map(p => parseInt(p, 10) & 0xFF);
+    }
+
+    // ASCII format: "Hello" (convert to bytes)
+    const bytes = [];
+    for (let i = 0; i < trimmed.length && i < dlc; i++) {
+      bytes.push(trimmed.charCodeAt(i) & 0xFF);
+    }
+    // Pad with zeros if needed
+    while (bytes.length < dlc) {
+      bytes.push(0);
+    }
+    return bytes;
+  }
+
+  // Parse batch message format
+  // Expected format: "ID:0xXXXX DLC:N DATA:HHHHH" (one per line)
+  parseBatchMessages(input) {
+    const messages = [];
+    const lines = input.trim().split('\n').filter(line => line.trim().length > 0);
+
+    for (const line of lines) {
+      const match = line.match(/ID:([0-9A-Fa-fx]+)\s+DLC:(\d+)\s+DATA:([\s0-9A-Fa-f]+)/i);
+      if (!match) {
+        throw new Error(`Invalid format on line: "${line}"\nExpected: ID:0xXXXX DLC:N DATA:HHHHH`);
+      }
+
+      const id = match[1];
+      const dlc = parseInt(match[2], 10);
+      const dataStr = match[3];
+
+      if (dlc < 0 || dlc > 8) {
+        throw new Error(`Invalid DLC: ${dlc} (must be 0-8)`);
+      }
+
+      messages.push({
+        idStr: id,
+        dlc: dlc,
+        dataStr: dataStr
+      });
+    }
+
+    return messages;
+  }
+
+  // Send batch of messages with delays between them
+  async sendBatchMessages(messages, intervalMs = 100, onProgress = null) {
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      try {
+        this.sendCANMessage(msg.idStr, msg.dlc, msg.dataStr);
+
+        if (onProgress) {
+          onProgress(i + 1, messages.length, msg);
+        }
+
+        // Delay before next message (except after the last one)
+        if (i < messages.length - 1 && intervalMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, intervalMs));
+        }
+      } catch (error) {
+        console.error(`[DevTools] Failed to send message ${i}:`, error);
+        throw new Error(`Message ${i + 1}: ${error.message}`);
+      }
+    }
   }
 }
 

@@ -14,11 +14,15 @@ class BatteryMonitor {
       messageCount: 0,
       maxMessages: 1000,
       filter: null,
+      excludeList: [], // Array of IDs to exclude (lowercase for comparison)
     };
 
     // CAN Analyzer (IndexedDB + statistics)
     this.canAnalyzer = null;
     this.statsDecodeMode = 'hex';
+
+    // Protocol Manager (browser-side CAN message parsing)
+    this.protocolManager = null;
 
     // Developer Tools (message sending)
     this.devTools = null;
@@ -32,6 +36,14 @@ class BatteryMonitor {
   }
 
   async init() {
+    // Initialize Protocol Manager (browser-side CAN parsing)
+    if (window.ProtocolManager) {
+      this.protocolManager = new window.ProtocolManager();
+      await this.protocolManager.ready;
+      console.debug("[App] Protocol Manager initialized");
+      this.updateProtocolList();
+    }
+
     // Initialize CAN Analyzer (wait for IndexedDB)
     if (window.CANAnalyzer) {
       this.canAnalyzer = new window.CANAnalyzer();
@@ -167,6 +179,11 @@ class BatteryMonitor {
       this.setCANFilter(e.target.value.trim());
     });
 
+    // CAN Exclude filter
+    document.getElementById("canExcludeInput").addEventListener("input", (e) => {
+      this.setCANExcludeFilter(e.target.value.trim());
+    });
+
     // CAN Stats button
     const statsBtn = document.getElementById("canStatsBtn");
     if (statsBtn) {
@@ -264,6 +281,69 @@ class BatteryMonitor {
       histClearBtn.addEventListener("click", () => {
         this.clearSendHistory();
       });
+    }
+
+    // Developer Tools - Batch Send
+    const batchSendBtn = document.getElementById("devBatchSendBtn");
+    if (batchSendBtn) {
+      batchSendBtn.addEventListener("click", () => {
+        this.sendBatchMessages();
+      });
+    }
+
+    const batchClearBtn = document.getElementById("devBatchClearBtn");
+    if (batchClearBtn) {
+      batchClearBtn.addEventListener("click", () => {
+        document.getElementById("devBatchMessages").value = "";
+      });
+    }
+
+    // Protocol selection button
+    const saveProtocolBtn = document.getElementById("saveProtocolBtn");
+    if (saveProtocolBtn) {
+      saveProtocolBtn.addEventListener("click", () => {
+        const select = document.getElementById("protocolSelect");
+        if (select.value) {
+          this.setActiveProtocol(select.value);
+        }
+      });
+    }
+  }
+
+  // Update protocol list in settings
+  updateProtocolList() {
+    if (!this.protocolManager) return;
+
+    const select = document.getElementById("protocolSelect");
+    if (!select) return;
+
+    const protocols = this.protocolManager.getAvailableProtocols();
+    select.innerHTML = "";
+
+    for (const proto of protocols) {
+      const option = document.createElement("option");
+      option.value = proto.id;
+      option.textContent = `${proto.name} (${proto.manufacturer})`;
+      select.appendChild(option);
+    }
+
+    // Select the first one by default
+    if (protocols.length > 0) {
+      select.value = protocols[0].id;
+    }
+  }
+
+  // Set active protocol
+  setActiveProtocol(protocolId) {
+    if (!this.protocolManager) {
+      this.showToast("Protocol manager not initialized", "error");
+      return;
+    }
+
+    if (this.protocolManager.setActiveProtocol(protocolId)) {
+      this.showToast(`Protocol set to: ${this.protocolManager.activeProtocol.name}`, "success");
+    } else {
+      this.showToast("Failed to set protocol", "error");
     }
   }
 
@@ -1188,11 +1268,17 @@ class BatteryMonitor {
 
     if (this.canMonitor.paused) return;
 
-    // Apply filter if set
+    // Apply include filter if set
     if (this.canMonitor.filter) {
       const msgId = message.id.toLowerCase();
       const filter = this.canMonitor.filter.toLowerCase();
       if (!msgId.includes(filter)) return;
+    }
+
+    // Apply exclude filter if set
+    if (this.canMonitor.excludeList.length > 0) {
+      const msgId = message.id.toLowerCase();
+      if (this.canMonitor.excludeList.includes(msgId)) return;
     }
 
     const viewer = document.getElementById("canLogViewer");
@@ -1211,11 +1297,9 @@ class BatteryMonitor {
     // Append to viewer
     viewer.value += line;
 
-    // Update counter
-    this.canMonitor.messageCount++;
-    document.getElementById("canMessageCount").textContent = this.formatNumber(
-      this.canMonitor.messageCount,
-    );
+    // Note: Do NOT increment local counter - use server's official count instead
+    // The server sends the authoritative message count from the logger every 5 seconds
+    // Incrementing locally causes "jumping chunks" when server updates override local count
 
     // Limit total lines to prevent memory issues
     const lines = viewer.value.split("\n");
@@ -1282,6 +1366,21 @@ class BatteryMonitor {
   setCANFilter(value) {
     this.canMonitor.filter = value || null;
     console.debug(`CAN filter ${value ? "set to: " + value : "cleared"}`);
+  }
+
+  setCANExcludeFilter(value) {
+    // Parse comma-separated list of IDs to exclude
+    if (value) {
+      // Split by comma, normalize to lowercase, remove spaces
+      this.canMonitor.excludeList = value
+        .split(',')
+        .map(id => id.trim().toLowerCase())
+        .filter(id => id.length > 0);
+      console.debug(`CAN exclude filter set to: ${this.canMonitor.excludeList.join(', ')}`);
+    } else {
+      this.canMonitor.excludeList = [];
+      console.debug("CAN exclude filter cleared");
+    }
   }
 
   // ASCII detection is now handled inline by the analyzer.
@@ -1546,6 +1645,52 @@ class BatteryMonitor {
       statusEl.className = "dev-status error";
 
       this.showToast(`Send failed: ${error.message}`, "error");
+    }
+  }
+
+  // Send batch of CAN messages
+  async sendBatchMessages() {
+    if (!this.devTools) {
+      this.showToast("DevTools not available", "error");
+      return;
+    }
+
+    const batchInput = document.getElementById("devBatchMessages");
+    const intervalInput = document.getElementById("devBatchInterval");
+    const statusEl = document.getElementById("devBatchStatus");
+
+    if (!batchInput.value.trim()) {
+      statusEl.textContent = "⚠ No messages to send";
+      statusEl.className = "dev-status warning";
+      return;
+    }
+
+    try {
+      // Parse batch messages
+      const messages = this.devTools.parseBatchMessages(batchInput.value);
+      const interval = parseInt(intervalInput.value) || 0;
+
+      statusEl.textContent = `Sending ${messages.length} message(s)...`;
+      statusEl.className = "dev-status info";
+
+      // Send with progress callback
+      await this.devTools.sendBatchMessages(messages, interval, (current, total, msg) => {
+        const idPad = msg.extended ? 8 : 3;
+        const idHex = msg.idStr.replace(/^0x/, '').toUpperCase().padStart(idPad, '0');
+        statusEl.textContent = `Sent ${current}/${total}: ID=0x${idHex} DLC=${msg.dlc}`;
+      });
+
+      statusEl.textContent = `✓ Successfully sent ${messages.length} message(s)`;
+      statusEl.className = "dev-status success";
+      this.showToast(`Batch sent: ${messages.length} messages`, "success");
+
+      setTimeout(() => {
+        statusEl.className = "dev-status";
+      }, 4000);
+    } catch (error) {
+      statusEl.textContent = `✗ Error: ${error.message}`;
+      statusEl.className = "dev-status error";
+      this.showToast(`Batch send failed: ${error.message}`, "error");
     }
   }
 
