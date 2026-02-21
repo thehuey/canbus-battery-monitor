@@ -1146,6 +1146,7 @@ void WebServer::buildAllBatteriesJSON(JsonObject obj) {
             battObj["temp1"] = battery->getTemp1();
             battObj["temp2"] = battery->getTemp2();
             battObj["has_error"] = battery->hasError();
+            battObj["pack_identifier"] = battery->getPackIdentifier();
             battObj["bms_info"] = battery->getBmsInfo();
 
             // Cell voltages

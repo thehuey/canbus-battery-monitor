@@ -5,6 +5,7 @@
 #include "can/can_driver.h"
 #include "can/can_parser.h"
 #include "can/can_logger.h"
+#include "can/builtin_protocols.h"
 #include "network/wifi_manager.h"
 #include "network/web_server.h"
 #include "network/mqtt_client.h"
@@ -247,6 +248,21 @@ void setupCANBus() {
         return;
     }
 
+    // Load protocol based on battery settings
+    const Settings& canSettings = settingsManager.getSettings();
+    const BatteryConfig& bat0 = canSettings.batteries[0];
+    switch (bat0.protocol_source) {
+        case ProtocolSource::BUILTIN_DPOWER_48V:
+            canParser.setProtocol(Protocol::getBuiltinProtocol(Protocol::BuiltinId::DPOWER_48V_13S));
+            break;
+        case ProtocolSource::BUILTIN_GENERIC_BMS:
+            canParser.setProtocol(Protocol::getBuiltinProtocol(Protocol::BuiltinId::GENERIC_BMS));
+            break;
+        default:
+            LOG_WARN("Custom protocol not yet loaded - using legacy parser");
+            break;
+    }
+
     // Set up message callback for logging and MQTT publishing
     canDriver.setMessageCallback([](const CANMessage& msg) {
         const Settings& settings = settingsManager.getSettings();
@@ -262,12 +278,6 @@ void setupCANBus() {
         // Publish to MQTT if enabled
         if (settings.mqtt_canmsg_enabled) {
             mqttClient.publishCANMessage(msg);
-        }
-
-        // Parse battery data
-        CANBatteryData battData;
-        if (canParser.parseMessage(msg, battData)) {
-            // Successfully parsed - will be handled in CAN task
         }
     });
 
