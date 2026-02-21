@@ -23,6 +23,11 @@ class BatteryMonitor {
     // Developer Tools (message sending)
     this.devTools = null;
 
+    // Protocol-based CAN parsing (client-side)
+    this.protocol = null;
+    this.protocolState = this.createEmptyProtocolState();
+    this._protocolUpdatePending = false;
+
     this.init();
   }
 
@@ -44,6 +49,12 @@ class BatteryMonitor {
     this.loadConfig();
     this.connectWebSocket();
     this.startPeriodicUpdates();
+
+    // Load initial protocol selection
+    const protocolSelect = document.getElementById("protocolSelect");
+    if (protocolSelect && protocolSelect.value) {
+      this.loadProtocol(protocolSelect.value);
+    }
   }
 
   setupEventListeners() {
@@ -103,6 +114,21 @@ class BatteryMonitor {
     if (saveCanBtn) {
       saveCanBtn.addEventListener("click", () => {
         this.saveCANLoggingConfig();
+      });
+    }
+
+    // Protocol selector
+    const protocolSelect = document.getElementById("protocolSelect");
+    if (protocolSelect) {
+      protocolSelect.addEventListener("change", (e) => {
+        const url = e.target.value;
+        if (url) {
+          this.loadProtocol(url);
+        } else {
+          this.protocol = null;
+          this.protocolState = this.createEmptyProtocolState();
+          console.debug("[Protocol] Disabled");
+        }
       });
     }
 
@@ -460,6 +486,21 @@ class BatteryMonitor {
   updateBatteries(data) {
     this.batteries = data.batteries || [];
 
+    // Overlay protocol-parsed data onto battery 0
+    if (this.protocol && this.batteries.length > 0) {
+      const ps = this.protocolState;
+      const bat = this.batteries[0];
+      if (ps.soc) bat.soc = ps.soc;
+      if (ps.max_soc) bat.max_soc = ps.max_soc;
+      if (ps.pack_identifier) bat.pack_identifier = ps.pack_identifier;
+      if (ps.bms_info) bat.bms_info = ps.bms_info;
+      if (ps.state !== null) bat.state = ps.state;
+      if (ps.state_name) bat.state_name = ps.state_name;
+      if (ps.cell_voltages.some(v => v > 0)) {
+        bat.cell_voltages = ps.cell_voltages.filter((v, i) => i < ps.cell_count);
+      }
+    }
+
     // Update summary
     document.getElementById("totalPower").textContent =
       (data.total_power || 0).toFixed(1) + " W";
@@ -495,7 +536,8 @@ class BatteryMonitor {
     }
 
     const statusClass = battery.has_error ? "error" : "ok";
-    const statusText = battery.has_error ? "Error" : "OK";
+    const statusText = battery.has_error ? "Error"
+      : (battery.state_name ? battery.state_name : "OK");
 
     // Parse pack identifier if available
     let packInfoHTML = "";
@@ -527,12 +569,16 @@ class BatteryMonitor {
       }
     }
 
-    // SOC display with max_soc
+    // SOC display with max_soc and percentage
     const socValue = battery.soc || 0;
     const maxSoc = battery.max_soc || 0;
-    const socDisplay = maxSoc > 0
-      ? `${socValue} / ${maxSoc}`
-      : `${socValue}`;
+    let socDisplay;
+    if (maxSoc > 0) {
+      const pct = ((socValue / maxSoc) * 100).toFixed(1);
+      socDisplay = `${pct}% <span class="metric-unit">(${socValue}/${maxSoc} mAh)</span>`;
+    } else {
+      socDisplay = `${socValue}`;
+    }
 
     // Cell voltages display
     let cellVoltagesHTML = "";
@@ -575,6 +621,178 @@ class BatteryMonitor {
         `;
 
     return card;
+  }
+
+  // ==========================================
+  // Protocol-based client-side CAN parsing
+  // ==========================================
+
+  createEmptyProtocolState() {
+    return {
+      soc: 0,
+      max_soc: 0,
+      pack_identifier: 0,
+      bms_info: '',
+      state: null,
+      state_name: '',
+      cell_voltages: new Array(13).fill(0),
+      cell_count: 13,
+      cellVoltageCounter: 0,
+    };
+  }
+
+  async loadProtocol(url) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error("[Protocol] Failed to fetch:", response.status);
+        this.showToast("Failed to load protocol", "error");
+        return;
+      }
+      this.protocol = await response.json();
+      this.protocolState = this.createEmptyProtocolState();
+      if (this.protocol.cell_count) {
+        this.protocolState.cell_count = this.protocol.cell_count;
+        this.protocolState.cell_voltages = new Array(this.protocol.cell_count).fill(0);
+      }
+      console.debug("[Protocol] Loaded:", this.protocol.name);
+      this.showToast("Protocol: " + this.protocol.name, "success");
+    } catch (error) {
+      console.error("[Protocol] Load error:", error);
+      this.showToast("Protocol load error", "error");
+    }
+  }
+
+  parseCANWithProtocol(message) {
+    const msgId = parseInt(message.id, 16);
+
+    // Find matching protocol message by can_id
+    const msgDef = this.protocol.messages.find(m => m.can_id === msgId);
+    if (!msgDef || !msgDef.fields || msgDef.fields.length === 0) return;
+
+    // Parse hex data string to byte array
+    const dataHex = message.data || '';
+    const bytes = [];
+    for (let i = 0; i < dataHex.length; i += 2) {
+      bytes.push(parseInt(dataHex.substr(i, 2), 16));
+    }
+
+    // Extract each field
+    for (const field of msgDef.fields) {
+      if (field.data_type === 'ascii') {
+        // ASCII text extraction
+        let ascii = '';
+        const end = Math.min(field.byte_offset + field.length, bytes.length);
+        for (let i = field.byte_offset; i < end; i++) {
+          if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) {
+            ascii += String.fromCharCode(bytes[i]);
+          }
+        }
+        this.mapProtocolField(field.name, 0, ascii);
+      } else if (field.name === 'cell_voltage_mv') {
+        // Sequential cell voltage messages
+        const value = this.extractProtocolValue(bytes, field);
+        const idx = this.protocolState.cellVoltageCounter;
+        if (idx < this.protocolState.cell_voltages.length) {
+          this.protocolState.cell_voltages[idx] = value;
+        }
+        this.protocolState.cellVoltageCounter =
+          (idx + 1) % this.protocolState.cell_count;
+      } else {
+        const rawValue = this.extractProtocolValue(bytes, field);
+        const value = rawValue * (field.scale || 1) + (field.offset || 0);
+
+        // Handle enum values
+        let enumName = null;
+        if (field.enum_values) {
+          enumName = field.enum_values[String(rawValue)] || null;
+        }
+
+        this.mapProtocolField(field.name, value, enumName);
+      }
+    }
+
+    // Schedule a UI update (batched via requestAnimationFrame)
+    if (!this._protocolUpdatePending) {
+      this._protocolUpdatePending = true;
+      requestAnimationFrame(() => {
+        this._protocolUpdatePending = false;
+        this.renderProtocolBatteries();
+      });
+    }
+  }
+
+  extractProtocolValue(bytes, field) {
+    const off = field.byte_offset || 0;
+    switch (field.data_type) {
+      case 'uint8':
+        return bytes[off] || 0;
+      case 'int8':
+        return (bytes[off] || 0) > 127 ? (bytes[off] - 256) : (bytes[off] || 0);
+      case 'uint16_le':
+        return ((bytes[off + 1] || 0) << 8) | (bytes[off] || 0);
+      case 'int16_le':
+        { const v = ((bytes[off + 1] || 0) << 8) | (bytes[off] || 0);
+          return v > 32767 ? v - 65536 : v; }
+      case 'uint16_be':
+        return ((bytes[off] || 0) << 8) | (bytes[off + 1] || 0);
+      case 'uint32_le':
+        return (((bytes[off + 3] || 0) << 24) | ((bytes[off + 2] || 0) << 16) |
+                ((bytes[off + 1] || 0) << 8) | (bytes[off] || 0)) >>> 0;
+      case 'uint32_be':
+        return (((bytes[off] || 0) << 24) | ((bytes[off + 1] || 0) << 16) |
+                ((bytes[off + 2] || 0) << 8) | (bytes[off + 3] || 0)) >>> 0;
+      default:
+        return bytes[off] || 0;
+    }
+  }
+
+  mapProtocolField(name, value, extra) {
+    const ps = this.protocolState;
+    switch (name) {
+      case 'soc':
+        ps.soc = value;
+        break;
+      case 'max_soc':
+        ps.max_soc = value;
+        break;
+      case 'pack_identifier':
+        ps.pack_identifier = value;
+        break;
+      case 'bms_info':
+        if (extra) ps.bms_info = extra;
+        break;
+      case 'state':
+        ps.state = value;
+        ps.state_name = extra || '';
+        break;
+    }
+  }
+
+  renderProtocolBatteries() {
+    // Only update if we have batteries to overlay onto
+    if (!this.batteries || this.batteries.length === 0) return;
+
+    const ps = this.protocolState;
+    const bat = this.batteries[0];
+    if (ps.soc) bat.soc = ps.soc;
+    if (ps.max_soc) bat.max_soc = ps.max_soc;
+    if (ps.pack_identifier) bat.pack_identifier = ps.pack_identifier;
+    if (ps.bms_info) bat.bms_info = ps.bms_info;
+    if (ps.state !== null) bat.state = ps.state;
+    if (ps.state_name) bat.state_name = ps.state_name;
+    if (ps.cell_voltages.some(v => v > 0)) {
+      bat.cell_voltages = ps.cell_voltages.filter((v, i) => i < ps.cell_count);
+    }
+
+    // Re-render battery cards
+    const container = document.getElementById("batteriesContainer");
+    if (!container) return;
+    container.innerHTML = "";
+    this.batteries.forEach((battery) => {
+      const card = this.createBatteryCard(battery);
+      container.appendChild(card);
+    });
   }
 
   /**
@@ -961,6 +1179,11 @@ class BatteryMonitor {
     // Analyze message with CAN Analyzer
     if (this.canAnalyzer) {
       this.canAnalyzer.analyzeMessage(message);
+    }
+
+    // Parse with protocol (always, even when monitor is paused)
+    if (this.protocol) {
+      this.parseCANWithProtocol(message);
     }
 
     if (this.canMonitor.paused) return;
