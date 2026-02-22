@@ -263,12 +263,6 @@ void setupCANBus() {
         if (settings.mqtt_canmsg_enabled) {
             mqttClient.publishCANMessage(msg);
         }
-
-        // Parse battery data
-        CANBatteryData battData;
-        if (canParser.parseMessage(msg, battData)) {
-            // Successfully parsed - will be handled in CAN task
-        }
     });
 
     // Enable periodic ping to test transceiver

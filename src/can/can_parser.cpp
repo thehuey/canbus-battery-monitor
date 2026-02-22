@@ -1,7 +1,7 @@
 #include "can_parser.h"
 #include <cmath>
 
-CANParser::CANParser() : protocol(nullptr), handler_count(0) {
+CANParser::CANParser() : protocol(nullptr), cell_voltage_counter(0), handler_count(0) {
     // Initialize handler registry
     for (size_t i = 0; i < MAX_HANDLERS; i++) {
         handlers[i].can_id = 0;
@@ -53,11 +53,42 @@ bool CANParser::parseWithProtocol(const CANMessage& msg, CANBatteryData& data) {
     }
 
     // Extract well-known fields into CANBatteryData structure
-    // Try to map protocol fields to standard data structure
     data.valid = true;
 
     for (uint8_t i = 0; i < msg_def->field_count; i++) {
         const Protocol::Field& field = msg_def->fields[i];
+
+        // Special handling for bms_info (ASCII text, not numeric)
+        if (strcmp(field.name, "bms_info") == 0) {
+            uint8_t len = field.length;
+            if (len > 8) len = 8;
+            if (len > msg.dlc) len = msg.dlc;
+            memcpy(data.bms_info, msg.data + field.byte_offset, len);
+            data.bms_info[len] = '\0';
+            data.updated_fields |= FIELD_BMS_INFO;
+            continue;
+        }
+
+        // Special handling for cell_voltage_mv (series of 13 sequential messages)
+        if (strcmp(field.name, "cell_voltage_mv") == 0) {
+            float value = field.extractValue(msg.data);
+            if (!isnan(value)) {
+                uint8_t idx = cell_voltage_counter;
+                if (idx >= MAX_CELL_COUNT) {
+                    idx = 0;
+                    cell_voltage_counter = 0;
+                }
+                data.cell_voltages[idx] = static_cast<uint16_t>(value);
+                data.cell_index = idx;
+                data.updated_fields |= FIELD_CELL_VOLTS;
+                cell_voltage_counter++;
+                if (cell_voltage_counter >= MAX_CELL_COUNT) {
+                    cell_voltage_counter = 0;
+                }
+            }
+            continue;
+        }
+
         float value = field.extractValue(msg.data);
 
         if (isnan(value)) continue;
@@ -66,35 +97,44 @@ bool CANParser::parseWithProtocol(const CANMessage& msg, CANBatteryData& data) {
         // Map common field names to CANBatteryData fields
         if (strcmp(field.name, "pack_voltage") == 0 ||
             strcmp(field.name, "total_voltage_mv") == 0) {
-            // Convert to volts if in millivolts
             if (strcmp(field.unit, "mV") == 0) {
                 data.pack_voltage = value / 1000.0f;
             } else {
                 data.pack_voltage = value;
             }
+            data.updated_fields |= FIELD_VOLTAGE;
         }
         else if (strcmp(field.name, "pack_current") == 0) {
-            // Convert to amps if in milliamps
             if (strcmp(field.unit, "mA") == 0) {
                 data.pack_current = value / 1000.0f;
             } else {
                 data.pack_current = value;
             }
+            data.updated_fields |= FIELD_CURRENT;
         }
         else if (strcmp(field.name, "soc") == 0) {
-            data.soc = static_cast<uint8_t>(value);
+            data.soc = static_cast<uint16_t>(value);
+            data.updated_fields |= FIELD_SOC;
+        }
+        else if (strcmp(field.name, "max_soc") == 0) {
+            data.max_soc = static_cast<uint16_t>(value);
+            data.updated_fields |= FIELD_MAX_SOC;
         }
         else if (strcmp(field.name, "temperature") == 0 || strcmp(field.name, "temp1") == 0) {
             data.temp1 = value;
+            data.updated_fields |= FIELD_TEMP1;
         }
         else if (strcmp(field.name, "temp2") == 0) {
             data.temp2 = value;
+            data.updated_fields |= FIELD_TEMP2;
         }
         else if (strcmp(field.name, "state") == 0 || strcmp(field.name, "status_flags") == 0) {
             data.status_flags = static_cast<uint8_t>(value);
+            data.updated_fields |= FIELD_STATUS;
         }
         else if (strcmp(field.name, "pack_identifier") == 0) {
             data.pack_identifier = static_cast<uint32_t>(value);
+            data.updated_fields |= FIELD_PACK_ID;
         }
     }
 
@@ -154,30 +194,35 @@ bool CANParser::parseBatteryStatus(const CANMessage& msg, CANBatteryData& data) 
     }
 
     // Determine battery ID from CAN message ID
-    // Assuming 0x100 = battery 0, 0x101 = battery 1, etc.
     data.battery_id = msg.id - 0x100;
 
     // Parse pack voltage (bytes 0-1, little-endian, in 0.1V units)
     uint16_t voltage_raw = Protocol::extractUint16LE(msg.data, 0);
     data.pack_voltage = voltage_raw * 0.1f;
+    data.updated_fields |= FIELD_VOLTAGE;
 
     // Parse pack current (bytes 2-3, signed, offset by 32000, in 0.1A units)
     int16_t current_raw = Protocol::extractInt16LE(msg.data, 2);
     data.pack_current = (current_raw - 32000) * 0.1f;
+    data.updated_fields |= FIELD_CURRENT;
 
     // Parse SOC (byte 4, 0-100%)
     data.soc = msg.data[4];
+    data.updated_fields |= FIELD_SOC;
 
     // Parse temperatures (bytes 5-6, offset by 40)
-    if (msg.data[5] != 0xFF) {  // 0xFF = invalid/not present
+    if (msg.data[5] != 0xFF) {
         data.temp1 = msg.data[5] - 40.0f;
+        data.updated_fields |= FIELD_TEMP1;
     }
     if (msg.data[6] != 0xFF) {
         data.temp2 = msg.data[6] - 40.0f;
+        data.updated_fields |= FIELD_TEMP2;
     }
 
     // Parse status flags (byte 7)
     data.status_flags = msg.data[7];
+    data.updated_fields |= FIELD_STATUS;
 
     data.valid = true;
     return true;
@@ -193,10 +238,6 @@ bool CANParser::parseCellVoltages(const CANMessage& msg, CANBatteryData& data) {
 
     // Determine battery ID
     data.battery_id = msg.id - 0x200;
-
-    // Cell voltages are typically in mV, stored as uint16_t
-    // This example just marks the data as valid but doesn't extract cell voltages
-    // since the CANBatteryData struct doesn't include individual cell data
 
     data.valid = true;
     return true;

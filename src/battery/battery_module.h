@@ -24,11 +24,15 @@ public:
     float getVoltage() const { return voltage; }
     float getCurrent() const { return current; }
     float getPower() const { return voltage * current; }
-    uint8_t getSOC() const { return soc; }
+    uint16_t getSOC() const { return soc; }
+    uint16_t getMaxSOC() const { return max_soc; }
     float getTemp1() const { return temp1; }
     float getTemp2() const { return temp2; }
     uint8_t getStatusFlags() const { return status_flags; }
     uint32_t getPackIdentifier() const { return pack_identifier; }
+    const char* getBmsInfo() const { return bms_info; }
+    const uint16_t* getCellVoltages() const { return cell_voltages; }
+    uint8_t getCellCount() const { return cell_count; }
     uint32_t getLastUpdate() const { return last_update; }
     bool hasError() const { return error; }
 
@@ -49,11 +53,15 @@ private:
     // Sensor data
     float voltage;              // Volts
     float current;              // Amps
-    uint8_t soc;                // State of charge (%)
+    uint16_t soc;               // State of charge (raw from BMS)
+    uint16_t max_soc;           // Maximum SOC capacity (raw from BMS)
     float temp1;                // Temperature 1 (°C)
     float temp2;                // Temperature 2 (°C)
     uint8_t status_flags;       // Status bits from CAN
     uint32_t pack_identifier;   // Manufacturing date/serial (YYDDMMSSSS format)
+    char bms_info[9];           // ASCII hardware/firmware/BMS info
+    uint16_t cell_voltages[MAX_CELL_COUNT]; // Per-cell voltages in mV
+    uint8_t cell_count;         // Number of cells with valid data
 
     // State
     bool has_can_data;

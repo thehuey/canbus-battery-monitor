@@ -29,6 +29,9 @@ public:
 private:
     const Protocol::Definition* protocol;
 
+    // Cell voltage series counter (0x202 sends 13 sequential messages)
+    uint8_t cell_voltage_counter;
+
     // Parse message using protocol definition
     bool parseWithProtocol(const CANMessage& msg, CANBatteryData& data);
 
