@@ -40,7 +40,7 @@
       "can_id": 514,
       "can_id_hex": "0x202",
       "name": "Cell Voltage",
-      "description": "Individual cell voltage in mV. Sent as a series of 13 messages, one per cell in sequence.",
+      "description": "Pack voltage in mV. Sent as a series of 13 messages.",
       "period_ms": 100,
       "fields": [
         {
@@ -50,7 +50,7 @@
           "length": 2,
           "data_type": "uint16_le",
           "unit": "mV",
-          "scale": 1.0,
+          "scale": 0.07692307692,
           "offset": 0.0,
           "min_value": 0,
           "max_value": 5000

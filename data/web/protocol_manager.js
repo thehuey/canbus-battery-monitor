@@ -3,54 +3,56 @@
 
 class ProtocolManager {
   constructor() {
-    this.protocols = {};          // Cache of loaded protocols
-    this.activeProtocol = null;   // Currently selected protocol
+    this.protocolList = [];       // Metadata from /api/protocols (filename, name, manufacturer)
+    this.protocolCache = {};      // Fully loaded protocol data (fetched on demand)
+    this.activeProtocol = null;   // Currently selected & loaded protocol
+    this.activeProtocolId = null; // Filename of active protocol
+    this.batteryState = {};       // Accumulated battery data from parsed CAN messages
+    this.onBatteryUpdate = null;  // Callback when battery data changes
+    this._cellVoltageIndex = 0;   // Track sequential cell voltage messages
     this.ready = this.init();
   }
 
   async init() {
-    // Load available protocols from the server
+    // Fetch protocol listing (includes name/manufacturer metadata from firmware)
     try {
       const response = await fetch('/api/protocols');
       const data = await response.json();
 
-      console.debug('[ProtocolManager] Available protocols:', data);
-
-      // Load protocol JSON files listed by the API
       if (data.custom) {
-        for (const proto of data.custom) {
-          const protoData = await this.loadProtocol(proto.filename);
-          if (protoData) {
-            this.protocols[proto.filename] = protoData;
-          }
-        }
+        this.protocolList = data.custom;
       }
 
-      // Auto-select first protocol if available
-      const keys = Object.keys(this.protocols);
-      if (keys.length > 0) {
-        this.setActiveProtocol(keys[0]);
+      console.debug('[ProtocolManager] Available protocols:', this.protocolList.map(p => p.filename));
+
+      // Auto-activate first protocol
+      if (this.protocolList.length > 0) {
+        await this.setActiveProtocol(this.protocolList[0].filename);
       }
 
-      console.debug('[ProtocolManager] Initialized with protocols:', keys);
       return true;
     } catch (error) {
-      console.error('[ProtocolManager] Failed to load protocols:', error);
+      console.error('[ProtocolManager] Failed to load protocol list:', error);
       return false;
     }
   }
 
-  async loadProtocol(protocolId) {
+  // Fetch and cache the full protocol JSON (lazy — only when needed for parsing)
+  async fetchProtocol(protocolId) {
+    if (this.protocolCache[protocolId]) {
+      return this.protocolCache[protocolId];
+    }
+
     try {
-      const response = await fetch(`/api/protocols/${protocolId}`);
+      const response = await fetch(`/protocols/${protocolId}`);
       if (!response.ok) {
-        console.warn(`[ProtocolManager] Failed to load protocol ${protocolId}`);
+        console.warn(`[ProtocolManager] Failed to fetch protocol ${protocolId}: ${response.status}`);
         return null;
       }
 
       const proto = await response.json();
 
-      // Index messages by CAN ID for fast lookup
+      // Index messages by numeric CAN ID for fast lookup
       proto.messageMap = {};
       if (proto.messages) {
         for (const msg of proto.messages) {
@@ -58,62 +60,102 @@ class ProtocolManager {
         }
       }
 
+      this.protocolCache[protocolId] = proto;
+      console.debug(`[ProtocolManager] Loaded protocol: ${proto.name} (${Object.keys(proto.messageMap).length} messages)`);
       return proto;
     } catch (error) {
-      console.error(`[ProtocolManager] Error loading protocol ${protocolId}:`, error);
+      console.error(`[ProtocolManager] Error fetching protocol ${protocolId}:`, error);
       return null;
     }
   }
 
-  setActiveProtocol(protocolId) {
-    if (this.protocols[protocolId]) {
-      this.activeProtocol = this.protocols[protocolId];
-      console.debug(`[ProtocolManager] Active protocol set to: ${protocolId} (${this.activeProtocol.name})`);
+  async setActiveProtocol(protocolId) {
+    const proto = await this.fetchProtocol(protocolId);
+    if (proto) {
+      this.activeProtocol = proto;
+      this.activeProtocolId = protocolId;
+      this.batteryState = {};  // Reset accumulated state on protocol change
+      this._cellVoltageIndex = 0;  // Reset cell voltage tracking
+      console.debug(`[ProtocolManager] Active protocol set to: ${protocolId} (${proto.name})`);
       return true;
-    } else {
-      console.warn(`[ProtocolManager] Protocol not found: ${protocolId}`);
-      return false;
     }
+    console.warn(`[ProtocolManager] Protocol not found or failed to load: ${protocolId}`);
+    return false;
   }
 
   getAvailableProtocols() {
-    return Object.entries(this.protocols).map(([id, proto]) => ({
-      id: id,
-      name: proto.name,
-      manufacturer: proto.manufacturer,
-      version: proto.version
+    return this.protocolList.map(p => ({
+      id: p.filename,
+      name: p.name || p.filename.replace('.json', ''),
+      manufacturer: p.manufacturer || '',
     }));
   }
 
-  parseMessage(canMessage) {
-    if (!this.activeProtocol) {
-      return null;
+  // Convert hex string CAN ID to numeric (e.g., "0x201" -> 513)
+  canIdToNumber(idStr) {
+    if (typeof idStr === 'number') return idStr;
+    return parseInt(idStr, 16);
+  }
+
+  // Convert hex data string to byte array (e.g., "A2000000" -> [0xA2, 0x00, 0x00, 0x00])
+  hexToBytes(hexStr) {
+    const bytes = [];
+    const clean = hexStr.replace(/\s/g, '');
+    for (let i = 0; i < clean.length; i += 2) {
+      bytes.push(parseInt(clean.substr(i, 2), 16));
+    }
+    return bytes;
+  }
+
+  // Process an incoming CAN message from the WebSocket
+  // canMessage: { id: "0x203", dlc: 8, data: "A200E70E..." }
+  processCANMessage(canMessage) {
+    if (!this.activeProtocol) return null;
+
+    const numericId = this.canIdToNumber(canMessage.id);
+    const msgDef = this.activeProtocol.messageMap[numericId];
+    if (!msgDef) return null;  // Not in protocol
+
+    const dataBytes = this.hexToBytes(canMessage.data);
+    const parsed = this.parseFields(msgDef, dataBytes);
+    if (!parsed) return null;
+
+    // Accumulate into battery state
+    this.applyToBatteryState(msgDef, parsed);
+
+    // Notify listener
+    if (this.onBatteryUpdate) {
+      this.onBatteryUpdate(this.batteryState);
     }
 
-    const msgDef = this.activeProtocol.messageMap[canMessage.id];
-    if (!msgDef) {
-      return null;  // Message not in protocol
-    }
+    return parsed;
+  }
+
+  parseFields(msgDef, dataBytes) {
+    if (!msgDef.fields) return null;
 
     const result = {
-      can_id: canMessage.id,
+      can_id: msgDef.can_id,
       message_name: msgDef.name,
-      description: msgDef.description,
       fields: {}
     };
 
-    // Extract fields from the CAN data
-    if (msgDef.fields) {
-      for (const field of msgDef.fields) {
-        const value = this.extractField(canMessage.data, field);
-        if (value !== null) {
-          result.fields[field.name] = {
-            value: value,
-            unit: field.unit,
-            description: field.description
-          };
-        }
+    for (const field of msgDef.fields) {
+      const value = this.extractField(dataBytes, field);
+      if (value === null) continue;
+
+      // Resolve enum display name if available
+      let displayValue = null;
+      if (field.enum_values && typeof value === 'number') {
+        displayValue = field.enum_values[String(Math.round(value))] || null;
       }
+
+      result.fields[field.name] = {
+        value: value,
+        displayValue: displayValue,
+        unit: field.unit,
+        description: field.description
+      };
     }
 
     return result;
@@ -125,13 +167,22 @@ class ProtocolManager {
       const length = field.length;
 
       if (offset + length > data.length) {
-        console.warn(`[ProtocolManager] Field ${field.name} exceeds data length`);
         return null;
+      }
+
+      // Handle ASCII type separately — returns a string
+      if (field.data_type === 'ascii') {
+        let str = '';
+        for (let i = offset; i < offset + length && i < data.length; i++) {
+          if (data[i] >= 0x20 && data[i] <= 0x7E) {
+            str += String.fromCharCode(data[i]);
+          }
+        }
+        return str;
       }
 
       let rawValue = 0;
 
-      // Parse based on data type
       switch (field.data_type) {
         case 'uint8':
           rawValue = data[offset];
@@ -143,10 +194,16 @@ class ProtocolManager {
           rawValue = (data[offset] << 8) | data[offset + 1];
           break;
         case 'uint32_le':
-          rawValue = data[offset] |
+          rawValue = (data[offset] |
                      (data[offset + 1] << 8) |
                      (data[offset + 2] << 16) |
-                     (data[offset + 3] << 24);
+                     ((data[offset + 3] << 24) >>> 0)) >>> 0;  // unsigned
+          break;
+        case 'uint32_be':
+          rawValue = (((data[offset] << 24) |
+                      (data[offset + 1] << 16) |
+                      (data[offset + 2] << 8) |
+                      data[offset + 3]) >>> 0);
           break;
         case 'int8':
           rawValue = data[offset];
@@ -156,12 +213,15 @@ class ProtocolManager {
           rawValue = data[offset] | (data[offset + 1] << 8);
           if (rawValue & 0x8000) rawValue = rawValue - 65536;
           break;
+        case 'int16_be':
+          rawValue = (data[offset] << 8) | data[offset + 1];
+          if (rawValue & 0x8000) rawValue = rawValue - 65536;
+          break;
         default:
-          console.warn(`[ProtocolManager] Unknown data type: ${field.data_type}`);
           return null;
       }
 
-      // Apply scale and offset
+      // Apply scale and offset from protocol definition
       let value = rawValue * (field.scale || 1.0) + (field.offset || 0.0);
 
       // Round to reasonable precision
@@ -174,69 +234,120 @@ class ProtocolManager {
     }
   }
 
-  // Map protocol fields to standard battery data fields
-  extractBatteryData(canMessage) {
-    const parsed = this.parseMessage(canMessage);
-    if (!parsed) {
-      return null;
-    }
+  // Map parsed fields into the accumulated battery state object
+  applyToBatteryState(msgDef, parsed) {
+    for (const [fieldName, fieldData] of Object.entries(parsed.fields)) {
+      const value = fieldData.value;
+      const unit = fieldData.unit;
+      const lowerName = fieldName.toLowerCase();
 
-    const batteryData = {
-      can_id: parsed.can_id,
-      message_name: parsed.message_name
-    };
-
-    // Map common field names to battery data structure
-    for (const [fieldName, fieldValue] of Object.entries(parsed.fields)) {
-      const value = fieldValue.value;
-      const unit = fieldValue.unit;
-
-      // Voltage fields
-      if (fieldName.includes('voltage') && fieldName.includes('pack')) {
-        if (unit === 'mV') {
-          batteryData.pack_voltage = value / 1000;
-        } else {
-          batteryData.pack_voltage = value;
+      // Sequential cell voltage messages (same field name, one per CAN message)
+      if (lowerName === 'cell_voltage_mv' || lowerName === 'cell_voltage') {
+        const cellCount = this.activeProtocol.cell_count || 13;
+        if (!this.batteryState.cell_voltages_mv) {
+          this.batteryState.cell_voltages_mv = new Array(cellCount).fill(0);
         }
-      }
-      // Current fields
-      else if (fieldName.includes('current') && fieldName.includes('pack')) {
-        if (unit === 'mA') {
-          batteryData.pack_current = value / 1000;
-        } else {
-          batteryData.pack_current = value;
+        this.batteryState.cell_voltages_mv[this._cellVoltageIndex] = value;
+        this._cellVoltageIndex = (this._cellVoltageIndex + 1) % cellCount;
+
+        // Calculate pack voltage from cell sum when we have all cells
+        const cells = this.batteryState.cell_voltages_mv;
+        if (cells.every(v => v > 0)) {
+          this.batteryState.voltage = Math.round(cells.reduce((s, v) => s + v, 0)) / 1000;
         }
+        continue;
       }
-      // SOC
-      else if (fieldName === 'soc' || fieldName.includes('state_of_charge')) {
-        batteryData.soc = Math.round(value);
+
+      // SOC / remaining capacity — distinguish mAh from percentage by unit
+      if (lowerName === 'soc' || lowerName === 'remaining_capacity' || lowerName === 'state_of_charge') {
+        if (unit === 'mAh') {
+          this.batteryState.remaining_mah = value;
+        } else {
+          this.batteryState.soc = Math.round(value);
+        }
+        continue;
       }
-      // Remaining capacity
-      else if (fieldName.includes('remaining') && fieldName.includes('mAh')) {
-        batteryData.remaining_mah = value;
-      }
+
       // Max capacity
-      else if (fieldName.includes('max') && fieldName.includes('mAh')) {
-        batteryData.max_mah = value;
+      if (lowerName === 'max_soc' || lowerName === 'max_capacity' || lowerName === 'full_capacity') {
+        this.batteryState.max_mah = value;
+        continue;
       }
-      // Temperature
-      else if (fieldName === 'temperature' || fieldName === 'temp1' || fieldName === 'temp_1') {
-        batteryData.temp1 = value;
-      }
-      else if (fieldName === 'temp2' || fieldName === 'temp_2') {
-        batteryData.temp2 = value;
-      }
-      // State/Status
-      else if (fieldName === 'state' || fieldName === 'status' || fieldName === 'status_flags') {
-        batteryData.status_flags = Math.round(value);
-      }
+
       // Pack identifier
-      else if (fieldName === 'pack_identifier') {
-        batteryData.pack_identifier = Math.round(value);
+      if (lowerName === 'pack_identifier') {
+        this.batteryState.pack_identifier = Math.round(value);
+        continue;
+      }
+
+      // BMS info (ascii string)
+      if (lowerName === 'bms_info') {
+        this.batteryState.bms_info = typeof value === 'string' ? value : String(value);
+        continue;
+      }
+
+      // Battery state with enum display name
+      if (lowerName === 'state' || lowerName === 'battery_state') {
+        this.batteryState.state = typeof value === 'number' ? Math.round(value) : value;
+        if (fieldData.displayValue) {
+          this.batteryState.state_name = fieldData.displayValue;
+        }
+        continue;
+      }
+
+      // Voltage (total pack)
+      if (lowerName.includes('total_voltage') || (lowerName.includes('voltage') && lowerName.includes('pack'))) {
+        this.batteryState.voltage = unit === 'mV' ? value / 1000 : value;
+        continue;
+      }
+
+      // Current
+      if (lowerName.includes('current') && (lowerName.includes('pack') || lowerName.includes('total'))) {
+        this.batteryState.current = unit === 'mA' ? value / 1000 : value;
+        continue;
+      }
+
+      // Temperature
+      if (lowerName === 'temperature' || lowerName === 'temp1' || lowerName === 'temp_1') {
+        this.batteryState.temp1 = value;
+      } else if (lowerName === 'temp2' || lowerName === 'temp_2') {
+        this.batteryState.temp2 = value;
+      }
+
+      // Individual cell voltages with index in name (e.g., cell_voltage_1)
+      if (lowerName.startsWith('cell_voltage_') && lowerName !== 'cell_voltage_mv') {
+        if (!this.batteryState.cell_voltages) {
+          this.batteryState.cell_voltages = {};
+        }
+        this.batteryState.cell_voltages[fieldName] = unit === 'mV' ? value / 1000 : value;
+      }
+
+      // Average cell voltage
+      if (lowerName.includes('avg_cell') || lowerName.includes('average_cell')) {
+        this.batteryState.avg_cell_voltage = unit === 'mV' ? value / 1000 : value;
       }
     }
 
-    return batteryData;
+    // Calculate SOC percentage from remaining/max mAh
+    if (this.batteryState.remaining_mah !== undefined &&
+        this.batteryState.max_mah !== undefined &&
+        this.batteryState.max_mah > 0) {
+      this.batteryState.soc = Math.round(
+        (this.batteryState.remaining_mah / this.batteryState.max_mah) * 100
+      );
+    }
+
+    // Calculate power from voltage and current
+    if (this.batteryState.voltage !== undefined && this.batteryState.current !== undefined) {
+      this.batteryState.power = Math.round(
+        this.batteryState.voltage * this.batteryState.current * 100
+      ) / 100;
+    }
+  }
+
+  // Get current battery state for display
+  getBatteryState() {
+    return { ...this.batteryState };
   }
 }
 

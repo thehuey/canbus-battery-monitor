@@ -116,6 +116,25 @@ void WebServer::setupWebSocket() {
     LOG_INFO("[WebServer] WebSocket handler registered at /ws");
 }
 
+// Returns a build-time date string suitable for the HTTP Last-Modified header.
+// Using the build date means CTRL-R conditional GETs get 304 Not Modified
+// responses (no body transfer), preventing concurrent SPIFFS reads that cause
+// ERR_CONTENT_LENGTH_MISMATCH. Re-flash to bust the cache after updating web files.
+static const char* getStaticLastModified() {
+    // __DATE__ is "Mon DD YYYY", __TIME__ is "HH:MM:SS"
+    // We need "DD Mon YYYY HH:MM:SS GMT" — day-of-week omitted; browsers accept it.
+    static char buf[40] = {0};
+    if (buf[0]) return buf;  // Already computed
+
+    const char* months_in[]  = {"Jan","Feb","Mar","Apr","May","Jun",
+                                 "Jul","Aug","Sep","Oct","Nov","Dec"};
+    char mon[4], year[5];
+    int day;
+    sscanf(__DATE__, "%3s %d %4s", mon, &day, year);
+    snprintf(buf, sizeof(buf), "%02d %s %s %s GMT", day, mon, year, __TIME__);
+    return buf;
+}
+
 void WebServer::setupStaticFiles() {
     // Log SPIFFS contents for debugging
     LOG_INFO("[WebServer] Checking SPIFFS filesystem contents:");
@@ -283,12 +302,20 @@ void WebServer::setupStaticFiles() {
     });
 
     // Serve protocol JSON files from /protocols/ directory on SPIFFS
-    server_.serveStatic("/protocols/", SPIFFS, "/protocols/");
+    // Last-Modified enables 304 Not Modified on CTRL-R reloads — no body transfer
+    server_.serveStatic("/protocols/", SPIFFS, "/protocols/")
+        .setCacheControl("max-age=86400")
+        .setLastModified(getStaticLastModified());
 
-    // Serve all files from /web/ directory on SPIFFS at the root path
-    // Any file in data/web/ is automatically available (e.g., /app.js, /style.css)
-    // No need to add individual serveStatic() calls when adding new files
-    server_.serveStatic("/", SPIFFS, "/web/");
+    // Serve all files from /web/ directory on SPIFFS at the root path.
+    // Any file in data/web/ is automatically available (e.g., /app.js, /style.css).
+    // Last-Modified is critical here: CTRL-R sends Cache-Control: max-age=0 which
+    // bypasses max-age, causing the browser to fire all ~6 resource requests at once.
+    // With Last-Modified set, CTRL-R uses conditional GET → 304 responses (no body),
+    // preventing the concurrent SPIFFS reads that cause ERR_CONTENT_LENGTH_MISMATCH.
+    server_.serveStatic("/", SPIFFS, "/web/")
+        .setCacheControl("max-age=3600")
+        .setLastModified(getStaticLastModified());
 
     LOG_INFO("[WebServer] Static file handlers registered");
 }
@@ -388,6 +415,7 @@ void WebServer::setupAPIEndpoints() {
     });
 
     // GET /api/protocols - List available protocol files from SPIFFS
+    // Includes name/manufacturer from each file so the browser doesn't need N+1 fetches
     server_.on("/api/protocols", HTTP_GET, [this](AsyncWebServerRequest* request) {
         request_count_++;
         JsonDocument doc;
@@ -397,15 +425,26 @@ void WebServer::setupAPIEndpoints() {
         if (dir && dir.isDirectory()) {
             File file = dir.openNextFile();
             while (file) {
-                const char* name = file.name();
+                const char* path = file.name();
                 // Only list .json files
-                if (strstr(name, ".json")) {
+                if (strstr(path, ".json")) {
                     JsonObject entry = custom.add<JsonObject>();
                     // Extract just the filename from the full path
-                    const char* slash = strrchr(name, '/');
-                    entry["filename"] = slash ? (slash + 1) : name;
+                    const char* slash = strrchr(path, '/');
+                    entry["filename"] = slash ? (slash + 1) : path;
                     entry["size"] = file.size();
+
+                    // Parse name and manufacturer from the protocol JSON
+                    JsonDocument proto;
+                    DeserializationError err = deserializeJson(proto, file);
+                    if (!err) {
+                        if (proto["name"].is<const char*>())
+                            entry["name"] = proto["name"];
+                        if (proto["manufacturer"].is<const char*>())
+                            entry["manufacturer"] = proto["manufacturer"];
+                    }
                 }
+                file.close();
                 file = dir.openNextFile();
             }
         }

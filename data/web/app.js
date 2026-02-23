@@ -42,6 +42,11 @@ class BatteryMonitor {
       await this.protocolManager.ready;
       console.debug("[App] Protocol Manager initialized");
       this.updateProtocolList();
+
+      // Wire up battery state updates from protocol-parsed CAN messages
+      this.protocolManager.onBatteryUpdate = (state) => {
+        this.updateBatteryFromProtocol(state);
+      };
     }
 
     // Initialize CAN Analyzer (wait for IndexedDB)
@@ -62,10 +67,9 @@ class BatteryMonitor {
     this.connectWebSocket();
     this.startPeriodicUpdates();
 
-    // Load initial protocol selection
-    const protocolSelect = document.getElementById("protocolSelect");
-    if (protocolSelect && protocolSelect.value) {
-      this.loadProtocol(protocolSelect.value);
+    // Auto-select first protocol if ProtocolManager loaded one
+    if (this.protocolManager && this.protocolManager.activeProtocol) {
+      console.debug("[App] Protocol auto-selected:", this.protocolManager.activeProtocol.name);
     }
   }
 
@@ -129,17 +133,13 @@ class BatteryMonitor {
       });
     }
 
-    // Protocol selector
+    // Protocol selector — use ProtocolManager for protocol switching
     const protocolSelect = document.getElementById("protocolSelect");
     if (protocolSelect) {
       protocolSelect.addEventListener("change", (e) => {
-        const url = e.target.value;
-        if (url) {
-          this.loadProtocol(url);
-        } else {
-          this.protocol = null;
-          this.protocolState = this.createEmptyProtocolState();
-          console.debug("[Protocol] Disabled");
+        const protocolId = e.target.value;
+        if (protocolId && this.protocolManager) {
+          this.setActiveProtocol(protocolId);
         }
       });
     }
@@ -298,49 +298,59 @@ class BatteryMonitor {
       });
     }
 
-    // Protocol selection button
+    // Protocol selection button (settings modal uses separate select ID)
     const saveProtocolBtn = document.getElementById("saveProtocolBtn");
     if (saveProtocolBtn) {
       saveProtocolBtn.addEventListener("click", () => {
-        const select = document.getElementById("protocolSelect");
-        if (select.value) {
+        const select = document.getElementById("settingsProtocolSelect");
+        if (select && select.value) {
           this.setActiveProtocol(select.value);
+          // Sync main page selector
+          const mainSelect = document.getElementById("protocolSelect");
+          if (mainSelect) mainSelect.value = select.value;
         }
       });
     }
   }
 
-  // Update protocol list in settings
+  // Update protocol list in both main page and settings selectors
   updateProtocolList() {
     if (!this.protocolManager) return;
 
-    const select = document.getElementById("protocolSelect");
-    if (!select) return;
-
     const protocols = this.protocolManager.getAvailableProtocols();
-    select.innerHTML = "";
+    const activeId = this.protocolManager.activeProtocolId
+      || (protocols.length > 0 ? protocols[0].id : null);
 
-    for (const proto of protocols) {
-      const option = document.createElement("option");
-      option.value = proto.id;
-      option.textContent = `${proto.name} (${proto.manufacturer})`;
-      select.appendChild(option);
-    }
+    // Populate both selectors
+    for (const selectId of ["protocolSelect", "settingsProtocolSelect"]) {
+      const select = document.getElementById(selectId);
+      if (!select) continue;
 
-    // Select the first one by default
-    if (protocols.length > 0) {
-      select.value = protocols[0].id;
+      select.innerHTML = "";
+      for (const proto of protocols) {
+        const option = document.createElement("option");
+        option.value = proto.id;
+        const name = proto.name || proto.id;
+        const mfg = proto.manufacturer;
+        option.textContent = mfg ? `${name} (${mfg})` : name;
+        select.appendChild(option);
+      }
+
+      if (activeId) {
+        select.value = activeId;
+      }
     }
   }
 
-  // Set active protocol
-  setActiveProtocol(protocolId) {
+  // Set active protocol (async — fetches full protocol JSON on demand)
+  async setActiveProtocol(protocolId) {
     if (!this.protocolManager) {
       this.showToast("Protocol manager not initialized", "error");
       return;
     }
 
-    if (this.protocolManager.setActiveProtocol(protocolId)) {
+    const success = await this.protocolManager.setActiveProtocol(protocolId);
+    if (success) {
       this.showToast(`Protocol set to: ${this.protocolManager.activeProtocol.name}`, "success");
     } else {
       this.showToast("Failed to set protocol", "error");
@@ -440,7 +450,7 @@ class BatteryMonitor {
 
       switch (message.type) {
         case "battery_update":
-          this.updateBatteries(message.data);
+          // Ignored — battery data now comes from protocol-parsed CAN messages
           break;
         case "system_status":
           this.updateSystemStatus(message.data);
@@ -456,9 +466,6 @@ class BatteryMonitor {
           // Handle initial status message (no type field)
           if (message.system) {
             this.updateSystemStatus(message.system);
-          }
-          if (message.batteries) {
-            this.updateBatteries(message.batteries);
           }
       }
     } catch (error) {
@@ -605,6 +612,57 @@ class BatteryMonitor {
     this.batteries.forEach((battery) => {
       const card = this.createBatteryCard(battery);
       container.appendChild(card);
+    });
+  }
+
+  // Update battery display from protocol-parsed CAN messages (batched via rAF)
+  updateBatteryFromProtocol(_state) {
+    if (this._protocolUIUpdatePending) return;
+    this._protocolUIUpdatePending = true;
+
+    requestAnimationFrame(() => {
+      this._protocolUIUpdatePending = false;
+      if (!this.protocolManager) return;
+
+      const state = this.protocolManager.batteryState;
+      const voltage = state.voltage || 0;
+      const current = state.current || 0;
+      const power = state.power || (voltage * current);
+
+      // Update summary metrics
+      document.getElementById("totalPower").textContent = power.toFixed(1) + " W";
+      document.getElementById("totalCurrent").textContent = current.toFixed(2) + " A";
+      document.getElementById("avgVoltage").textContent = voltage.toFixed(1) + " V";
+
+      // Build a battery object compatible with createBatteryCard
+      const battery = {
+        id: 1,
+        name: this.protocolManager.activeProtocol
+          ? this.protocolManager.activeProtocol.name
+          : "Battery 1",
+        voltage: voltage,
+        current: current,
+        power: power,
+        soc: state.remaining_mah || 0,
+        max_soc: state.max_mah || 0,
+        pack_identifier: state.pack_identifier || null,
+        bms_info: state.bms_info || null,
+        state: state.state !== undefined ? state.state : null,
+        state_name: state.state_name || '',
+        has_error: false,
+      };
+
+      // Add cell voltages (array of mV values)
+      if (state.cell_voltages_mv && state.cell_voltages_mv.some(v => v > 0)) {
+        battery.cell_voltages = state.cell_voltages_mv;
+      }
+
+      // Update the battery cards container
+      const container = document.getElementById("batteriesContainer");
+      if (!container) return;
+
+      container.innerHTML = "";
+      container.appendChild(this.createBatteryCard(battery));
     });
   }
 
@@ -771,7 +829,7 @@ class BatteryMonitor {
         this.mapProtocolField(field.name, 0, ascii);
       } else if (field.name === 'cell_voltage_mv') {
         // Sequential cell voltage messages
-        const value = this.extractProtocolValue(bytes, field);
+        const value = this.extractProtocolValue(bytes, field) * (field.scale || 1) + (field.offset || 0);
         const idx = this.protocolState.cellVoltageCounter;
         if (idx < this.protocolState.cell_voltages.length) {
           this.protocolState.cell_voltages[idx] = value;
@@ -1254,7 +1312,10 @@ class BatteryMonitor {
 
   // CAN Monitor Methods
   handleCANMessage(message) {
-    // console.log("CAN message received:", message);
+    // Parse CAN message with protocol manager for battery data extraction
+    if (this.protocolManager) {
+      this.protocolManager.processCANMessage(message);
+    }
 
     // Analyze message with CAN Analyzer
     if (this.canAnalyzer) {
