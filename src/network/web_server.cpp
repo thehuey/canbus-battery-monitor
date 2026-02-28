@@ -121,17 +121,34 @@ void WebServer::setupWebSocket() {
 // responses (no body transfer), preventing concurrent SPIFFS reads that cause
 // ERR_CONTENT_LENGTH_MISMATCH. Re-flash to bust the cache after updating web files.
 static const char* getStaticLastModified() {
-    // __DATE__ is "Mon DD YYYY", __TIME__ is "HH:MM:SS"
-    // We need "DD Mon YYYY HH:MM:SS GMT" — day-of-week omitted; browsers accept it.
+    // Format: "Day, DD Mon YYYY HH:MM:SS GMT" per RFC 7231 section 7.1.1.1
+    // Browsers may normalize Last-Modified before storing, so the format must be
+    // standards-compliant or the If-Modified-Since string equality check will fail.
     static char buf[40] = {0};
     if (buf[0]) return buf;  // Already computed
 
     const char* months_in[]  = {"Jan","Feb","Mar","Apr","May","Jun",
                                  "Jul","Aug","Sep","Oct","Nov","Dec"};
-    char mon[4], year[5];
-    int day;
-    sscanf(__DATE__, "%3s %d %4s", mon, &day, year);
-    snprintf(buf, sizeof(buf), "%02d %s %s %s GMT", day, mon, year, __TIME__);
+    const char* days_of_week[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+
+    char mon[4];
+    int day, year;
+    sscanf(__DATE__, "%3s %d %d", mon, &day, &year);
+
+    // Find month index (0-based)
+    int month = 0;
+    for (int i = 0; i < 12; i++) {
+        if (strncmp(mon, months_in[i], 3) == 0) { month = i + 1; break; }
+    }
+
+    // Tomohiko Sakamoto's day-of-week algorithm (0=Sun, 1=Mon, ..., 6=Sat)
+    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    int y = year;
+    if (month < 3) y--;
+    int dow = (y + y/4 - y/100 + y/400 + t[month - 1] + day) % 7;
+
+    snprintf(buf, sizeof(buf), "%s, %02d %s %04d %s GMT",
+             days_of_week[dow], day, mon, year, __TIME__);
     return buf;
 }
 
@@ -143,8 +160,10 @@ void WebServer::setupStaticFiles() {
         File file = root.openNextFile();
         while (file) {
             LOG_INFO("[WebServer]   Found: %s (%d bytes)", file.name(), file.size());
+            file.close();
             file = root.openNextFile();
         }
+        root.close();
     } else {
         LOG_WARN("[WebServer] Failed to open SPIFFS root directory");
     }
@@ -447,6 +466,7 @@ void WebServer::setupAPIEndpoints() {
                 file.close();
                 file = dir.openNextFile();
             }
+            dir.close();
         }
 
         sendJSON(request, doc);

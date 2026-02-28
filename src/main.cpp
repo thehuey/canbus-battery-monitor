@@ -472,11 +472,12 @@ void networkTask(void* parameter) {
 
         // Only broadcast if WiFi is connected
         if (wifiManager.isConnected() || wifiManager.isAPActive()) {
-            // Broadcast battery updates via WebSocket
-            if (now - last_battery_broadcast > settings.web_refresh_ms) {
-                webServer.broadcastBatteryUpdate();
-                last_battery_broadcast = now;
-            }
+            // Battery updates now come from protocol-parsed CAN messages in the browser
+            // broadcastBatteryUpdate() disabled to save bandwidth
+            // if (now - last_battery_broadcast > settings.web_refresh_ms) {
+            //     webServer.broadcastBatteryUpdate();
+            //     last_battery_broadcast = now;
+            // }
 
             // Broadcast system status less frequently (every 5 seconds)
             if (now - last_system_broadcast > 5000) {

@@ -196,9 +196,11 @@ uint8_t Loader::listCustomProtocols(ProtocolInfo* protocols, uint8_t max_count) 
                 count++;
             }
         }
+        file.close();
         file = root.openNextFile();
     }
 
+    root.close();
     return count;
 }
 

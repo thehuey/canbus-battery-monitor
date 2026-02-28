@@ -96,7 +96,8 @@ bool CANParser::parseWithProtocol(const CANMessage& msg, CANBatteryData& data) {
 
         // Map common field names to CANBatteryData fields
         if (strcmp(field.name, "pack_voltage") == 0 ||
-            strcmp(field.name, "total_voltage_mv") == 0) {
+            strcmp(field.name, "total_voltage_mv") == 0 ||
+            strcmp(field.name, "pack_voltage_mv") == 0) {
             if (strcmp(field.unit, "mV") == 0) {
                 data.pack_voltage = value / 1000.0f;
             } else {

@@ -76,6 +76,7 @@ class ProtocolManager {
       this.activeProtocolId = protocolId;
       this.batteryState = {};  // Reset accumulated state on protocol change
       this._cellVoltageIndex = 0;  // Reset cell voltage tracking
+      this._hasDirectPackVoltage = false;  // Reset direct voltage flag
       console.debug(`[ProtocolManager] Active protocol set to: ${protocolId} (${proto.name})`);
       return true;
     }
@@ -241,7 +242,15 @@ class ProtocolManager {
       const unit = fieldData.unit;
       const lowerName = fieldName.toLowerCase();
 
+      // Single pack voltage in mV (e.g., dpower 0x202 pack_voltage_mv)
+      if (lowerName === 'pack_voltage_mv') {
+        this.batteryState.voltage = Math.round(value) / 1000;
+        this._hasDirectPackVoltage = true;
+        continue;
+      }
+
       // Sequential cell voltage messages (same field name, one per CAN message)
+      // Used by protocols that send one cell voltage per CAN frame across N frames
       if (lowerName === 'cell_voltage_mv' || lowerName === 'cell_voltage') {
         const cellCount = this.activeProtocol.cell_count || 13;
         if (!this.batteryState.cell_voltages_mv) {
@@ -251,8 +260,9 @@ class ProtocolManager {
         this._cellVoltageIndex = (this._cellVoltageIndex + 1) % cellCount;
 
         // Calculate pack voltage from cell sum when we have all cells
+        // but only if no direct pack voltage has been set
         const cells = this.batteryState.cell_voltages_mv;
-        if (cells.every(v => v > 0)) {
+        if (!this._hasDirectPackVoltage && cells.every(v => v > 0)) {
           this.batteryState.voltage = Math.round(cells.reduce((s, v) => s + v, 0)) / 1000;
         }
         continue;

@@ -70,17 +70,17 @@ static Definition createDPowerProtocol() {
                                  0, 4, DataType::UINT32_LE, "", 1.0f, 0.0f, "",
                                  0.0f, 0.0f, false, false);
 
-    // Message 0x202 - Cell Voltage (series of 13)
+    // Message 0x202 - Pack Voltage
     Message& msg202 = proto.messages[1];
     msg202.can_id = 0x202;
-    strncpy(msg202.name, "Cell Voltage", sizeof(msg202.name) - 1);
-    strncpy(msg202.description, "Cell voltage mV (13 in seq)", sizeof(msg202.description) - 1);
+    strncpy(msg202.name, "Pack Voltage", sizeof(msg202.name) - 1);
+    strncpy(msg202.description, "Total pack voltage in mV", sizeof(msg202.description) - 1);
     msg202.period_ms = 100;
     msg202.field_count = 1;
 
-    msg202.fields[0] = makeField("cell_voltage_mv", "Cell voltage in mV (series)",
+    msg202.fields[0] = makeField("pack_voltage_mv", "Total pack voltage in mV",
                                  0, 2, DataType::UINT16_LE, "mV", 1.0f, 0.0f, "",
-                                 0.0f, 5000.0f, true, true);
+                                 46800.0f, 54600.0f, true, true);
 
     // Message 0x203 - State of Charge
     Message& msg203 = proto.messages[2];

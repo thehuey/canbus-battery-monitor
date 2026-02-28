@@ -37,6 +37,15 @@ body {
     padding-bottom: 20px;
 }
 
+/* Sticky Header Wrapper */
+.sticky-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow);
+}
+
 /* Header */
 .header {
     background: var(--bg-secondary);
@@ -44,10 +53,42 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    box-shadow: var(--shadow);
-    position: sticky;
-    top: 0;
-    z-index: 100;
+}
+
+/* Tab Bar */
+.tab-bar {
+    display: flex;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    padding: 0 0.5rem;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 0.75rem 0.5rem;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+    white-space: nowrap;
+}
+
+.tab-btn:hover {
+    color: var(--text-secondary);
+}
+
+.tab-btn.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+/* Page Containers */
+.page {
+    /* pages are shown/hidden via JS display toggle */
 }
 
 .header h1 {
@@ -125,7 +166,7 @@ body {
 
 .summary-value {
     display: block;
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 700;
     color: var(--text-primary);
 }
@@ -385,6 +426,79 @@ body {
     font-weight: 600;
     margin-bottom: 1rem;
     color: var(--text-primary);
+}
+
+/* Settings Tab Bar */
+.settings-tab-bar {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1.5rem;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.settings-tab-btn {
+    flex: 1;
+    padding: 0.6rem 0.5rem;
+    background: var(--bg-card);
+    border: none;
+    border-right: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.settings-tab-btn:last-child {
+    border-right: none;
+}
+
+.settings-tab-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-primary);
+}
+
+.settings-tab-btn.active {
+    background: var(--primary-color);
+    color: white;
+}
+
+.settings-page {
+    display: none;
+}
+
+.settings-page.active {
+    display: block;
+}
+
+/* SOC Progress Bar */
+.soc-bar {
+    margin-top: 0.75rem;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    height: 8px;
+    overflow: hidden;
+}
+
+.soc-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.5s ease, background-color 0.5s ease;
+}
+
+.soc-bar-fill.soc-good {
+    background: var(--success-color);
+}
+
+.soc-bar-fill.soc-warn {
+    background: var(--warning-color);
+}
+
+.soc-bar-fill.soc-crit {
+    background: var(--danger-color);
 }
 
 /* Forms */
@@ -729,6 +843,16 @@ body {
 
 .can-monitor-body {
     padding: 0;
+}
+
+/* Full-page CAN monitor gets taller textarea */
+#page-can .can-monitor {
+    margin: 0.5rem;
+}
+
+#page-can #canLogViewer {
+    height: calc(100vh - 280px);
+    min-height: 400px;
 }
 
 #canLogViewer {

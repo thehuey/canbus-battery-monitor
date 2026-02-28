@@ -15,6 +15,7 @@ class BatteryMonitor {
       maxMessages: 1000,
       filter: null,
       excludeList: [], // Array of IDs to exclude (lowercase for comparison)
+      visible: false,  // Only true when CAN Monitor page is active
     };
 
     // CAN Analyzer (IndexedDB + statistics)
@@ -27,10 +28,8 @@ class BatteryMonitor {
     // Developer Tools (message sending)
     this.devTools = null;
 
-    // Protocol-based CAN parsing (client-side)
-    this.protocol = null;
-    this.protocolState = this.createEmptyProtocolState();
-    this._protocolUpdatePending = false;
+    // Protocol UI update batching
+    this._protocolUIUpdatePending = false;
 
     this.init();
   }
@@ -62,6 +61,7 @@ class BatteryMonitor {
     }
 
     this.setupEventListeners();
+    this.initRouter();
     this.setupASCIIDetection();
     this.loadConfig();
     this.connectWebSocket();
@@ -71,6 +71,74 @@ class BatteryMonitor {
     if (this.protocolManager && this.protocolManager.activeProtocol) {
       console.debug("[App] Protocol auto-selected:", this.protocolManager.activeProtocol.name);
     }
+  }
+
+  // ==========================================
+  // SPA Router
+  // ==========================================
+
+  initRouter() {
+    // Tab button clicks
+    document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.navigateTo(btn.dataset.tab);
+      });
+    });
+
+    // Settings tab clicks (event delegation)
+    const settingsTabBar = document.querySelector('.settings-tab-bar');
+    if (settingsTabBar) {
+      settingsTabBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('.settings-tab-btn');
+        if (!btn) return;
+        this.showSettingsTab(btn.dataset.settingsTab);
+      });
+    }
+
+    // Handle browser back/forward
+    window.addEventListener('hashchange', () => {
+      this.showPage(this.getPageFromHash());
+    });
+
+    // Show initial page from hash (or default to dashboard)
+    this.showPage(this.getPageFromHash());
+  }
+
+  getPageFromHash() {
+    const hash = location.hash.replace('#', '');
+    return ['dashboard', 'can', 'devtools'].includes(hash) ? hash : 'dashboard';
+  }
+
+  navigateTo(page) {
+    location.hash = '#' + page;
+  }
+
+  showPage(page) {
+    // Update page containers
+    document.querySelectorAll('.page').forEach(el => {
+      el.style.display = 'none';
+    });
+    const target = document.getElementById('page-' + page);
+    if (target) target.style.display = '';
+
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === page);
+    });
+
+    // CAN monitor visibility flag
+    this.canMonitor.visible = (page === 'can');
+  }
+
+  showSettingsTab(tab) {
+    document.querySelectorAll('.settings-page').forEach(el => {
+      el.classList.remove('active');
+    });
+    document.querySelectorAll('.settings-tab-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.settingsTab === tab);
+    });
+    const target = document.getElementById('settings-' + tab);
+    if (target) target.classList.add('active');
   }
 
   setupEventListeners() {
@@ -573,21 +641,6 @@ class BatteryMonitor {
   updateBatteries(data) {
     this.batteries = data.batteries || [];
 
-    // Overlay protocol-parsed data onto battery 0
-    if (this.protocol && this.batteries.length > 0) {
-      const ps = this.protocolState;
-      const bat = this.batteries[0];
-      if (ps.soc) bat.soc = ps.soc;
-      if (ps.max_soc) bat.max_soc = ps.max_soc;
-      if (ps.pack_identifier) bat.pack_identifier = ps.pack_identifier;
-      if (ps.bms_info) bat.bms_info = ps.bms_info;
-      if (ps.state !== null) bat.state = ps.state;
-      if (ps.state_name) bat.state_name = ps.state_name;
-      if (ps.cell_voltages.some(v => v > 0)) {
-        bat.cell_voltages = ps.cell_voltages.filter((v, i) => i < ps.cell_count);
-      }
-    }
-
     // Update summary
     document.getElementById("totalPower").textContent =
       (data.total_power || 0).toFixed(1) + " W";
@@ -731,6 +784,17 @@ class BatteryMonitor {
             </div>`;
     }
 
+    // SOC progress bar
+    let socBarHTML = "";
+    if (maxSoc > 0) {
+      const pctNum = Math.min((socValue / maxSoc) * 100, 100);
+      const socClass = pctNum > 20 ? 'soc-good' : pctNum > 10 ? 'soc-warn' : 'soc-crit';
+      socBarHTML = `
+            <div class="soc-bar">
+                <div class="soc-bar-fill ${socClass}" style="width: ${pctNum.toFixed(1)}%"></div>
+            </div>`;
+    }
+
     card.innerHTML = `
             <div class="battery-header">
                 <div class="battery-name">${this.escapeHtml(battery.name || `Battery ${battery.id}`)}</div>
@@ -755,182 +819,11 @@ class BatteryMonitor {
                     <span class="metric-value">${socDisplay}</span>
                 </div>
             </div>
+            ${socBarHTML}
             ${cellVoltagesHTML}
         `;
 
     return card;
-  }
-
-  // ==========================================
-  // Protocol-based client-side CAN parsing
-  // ==========================================
-
-  createEmptyProtocolState() {
-    return {
-      soc: 0,
-      max_soc: 0,
-      pack_identifier: 0,
-      bms_info: '',
-      state: null,
-      state_name: '',
-      cell_voltages: new Array(13).fill(0),
-      cell_count: 13,
-      cellVoltageCounter: 0,
-    };
-  }
-
-  async loadProtocol(url) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        console.error("[Protocol] Failed to fetch:", response.status);
-        this.showToast("Failed to load protocol", "error");
-        return;
-      }
-      this.protocol = await response.json();
-      this.protocolState = this.createEmptyProtocolState();
-      if (this.protocol.cell_count) {
-        this.protocolState.cell_count = this.protocol.cell_count;
-        this.protocolState.cell_voltages = new Array(this.protocol.cell_count).fill(0);
-      }
-      console.debug("[Protocol] Loaded:", this.protocol.name);
-      this.showToast("Protocol: " + this.protocol.name, "success");
-    } catch (error) {
-      console.error("[Protocol] Load error:", error);
-      this.showToast("Protocol load error", "error");
-    }
-  }
-
-  parseCANWithProtocol(message) {
-    const msgId = parseInt(message.id, 16);
-
-    // Find matching protocol message by can_id
-    const msgDef = this.protocol.messages.find(m => m.can_id === msgId);
-    if (!msgDef || !msgDef.fields || msgDef.fields.length === 0) return;
-
-    // Parse hex data string to byte array
-    const dataHex = message.data || '';
-    const bytes = [];
-    for (let i = 0; i < dataHex.length; i += 2) {
-      bytes.push(parseInt(dataHex.substr(i, 2), 16));
-    }
-
-    // Extract each field
-    for (const field of msgDef.fields) {
-      if (field.data_type === 'ascii') {
-        // ASCII text extraction
-        let ascii = '';
-        const end = Math.min(field.byte_offset + field.length, bytes.length);
-        for (let i = field.byte_offset; i < end; i++) {
-          if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) {
-            ascii += String.fromCharCode(bytes[i]);
-          }
-        }
-        this.mapProtocolField(field.name, 0, ascii);
-      } else if (field.name === 'cell_voltage_mv') {
-        // Sequential cell voltage messages
-        const value = this.extractProtocolValue(bytes, field) * (field.scale || 1) + (field.offset || 0);
-        const idx = this.protocolState.cellVoltageCounter;
-        if (idx < this.protocolState.cell_voltages.length) {
-          this.protocolState.cell_voltages[idx] = value;
-        }
-        this.protocolState.cellVoltageCounter =
-          (idx + 1) % this.protocolState.cell_count;
-      } else {
-        const rawValue = this.extractProtocolValue(bytes, field);
-        const value = rawValue * (field.scale || 1) + (field.offset || 0);
-
-        // Handle enum values
-        let enumName = null;
-        if (field.enum_values) {
-          enumName = field.enum_values[String(rawValue)] || null;
-        }
-
-        this.mapProtocolField(field.name, value, enumName);
-      }
-    }
-
-    // Schedule a UI update (batched via requestAnimationFrame)
-    if (!this._protocolUpdatePending) {
-      this._protocolUpdatePending = true;
-      requestAnimationFrame(() => {
-        this._protocolUpdatePending = false;
-        this.renderProtocolBatteries();
-      });
-    }
-  }
-
-  extractProtocolValue(bytes, field) {
-    const off = field.byte_offset || 0;
-    switch (field.data_type) {
-      case 'uint8':
-        return bytes[off] || 0;
-      case 'int8':
-        return (bytes[off] || 0) > 127 ? (bytes[off] - 256) : (bytes[off] || 0);
-      case 'uint16_le':
-        return ((bytes[off + 1] || 0) << 8) | (bytes[off] || 0);
-      case 'int16_le':
-        { const v = ((bytes[off + 1] || 0) << 8) | (bytes[off] || 0);
-          return v > 32767 ? v - 65536 : v; }
-      case 'uint16_be':
-        return ((bytes[off] || 0) << 8) | (bytes[off + 1] || 0);
-      case 'uint32_le':
-        return (((bytes[off + 3] || 0) << 24) | ((bytes[off + 2] || 0) << 16) |
-                ((bytes[off + 1] || 0) << 8) | (bytes[off] || 0)) >>> 0;
-      case 'uint32_be':
-        return (((bytes[off] || 0) << 24) | ((bytes[off + 1] || 0) << 16) |
-                ((bytes[off + 2] || 0) << 8) | (bytes[off + 3] || 0)) >>> 0;
-      default:
-        return bytes[off] || 0;
-    }
-  }
-
-  mapProtocolField(name, value, extra) {
-    const ps = this.protocolState;
-    switch (name) {
-      case 'soc':
-        ps.soc = value;
-        break;
-      case 'max_soc':
-        ps.max_soc = value;
-        break;
-      case 'pack_identifier':
-        ps.pack_identifier = value;
-        break;
-      case 'bms_info':
-        if (extra) ps.bms_info = extra;
-        break;
-      case 'state':
-        ps.state = value;
-        ps.state_name = extra || '';
-        break;
-    }
-  }
-
-  renderProtocolBatteries() {
-    // Only update if we have batteries to overlay onto
-    if (!this.batteries || this.batteries.length === 0) return;
-
-    const ps = this.protocolState;
-    const bat = this.batteries[0];
-    if (ps.soc) bat.soc = ps.soc;
-    if (ps.max_soc) bat.max_soc = ps.max_soc;
-    if (ps.pack_identifier) bat.pack_identifier = ps.pack_identifier;
-    if (ps.bms_info) bat.bms_info = ps.bms_info;
-    if (ps.state !== null) bat.state = ps.state;
-    if (ps.state_name) bat.state_name = ps.state_name;
-    if (ps.cell_voltages.some(v => v > 0)) {
-      bat.cell_voltages = ps.cell_voltages.filter((v, i) => i < ps.cell_count);
-    }
-
-    // Re-render battery cards
-    const container = document.getElementById("batteriesContainer");
-    if (!container) return;
-    container.innerHTML = "";
-    this.batteries.forEach((battery) => {
-      const card = this.createBatteryCard(battery);
-      container.appendChild(card);
-    });
   }
 
   /**
@@ -1322,12 +1215,8 @@ class BatteryMonitor {
       this.canAnalyzer.analyzeMessage(message);
     }
 
-    // Parse with protocol (always, even when monitor is paused)
-    if (this.protocol) {
-      this.parseCANWithProtocol(message);
-    }
-
-    if (this.canMonitor.paused) return;
+    // Skip DOM updates when CAN Monitor page is not visible or paused
+    if (this.canMonitor.paused || !this.canMonitor.visible) return;
 
     // Apply include filter if set
     if (this.canMonitor.filter) {
@@ -1393,7 +1282,8 @@ class BatteryMonitor {
   clearCANMonitor() {
     document.getElementById("canLogViewer").value = "";
     this.canMonitor.messageCount = 0;
-    document.getElementById("canMessageCount").textContent = "0";
+    const el = document.getElementById("canMonitorCount");
+    if (el) el.textContent = "0 messages";
     this.showToast("CAN monitor cleared", "success");
   }
 
