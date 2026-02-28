@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>eBike Display</title>
+<style>
+/* Simulates a compact ESP32 built-in display (OLED/TFT style) */
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --green: #00ff41;
+  --yellow: #ffd700;
+  --red: #ff3333;
+  --dim: #334455;
+  --bg: #000;
+  --text: #e0e0e0;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px;
+}
+.display-frame {
+  width: 100%;
+  max-width: 320px;
+  border: 2px solid #222;
+  border-radius: 8px;
+  padding: 8px;
+  background: #000;
+}
+/* Top status row */
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: #666;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #111;
+}
+.wifi-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+.wifi-dot.on { background: var(--green); }
+.wifi-dot.off { background: var(--red); }
+/* Main battery section */
+.batt-section {
+  margin-bottom: 8px;
+}
+.batt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.batt-name {
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--green);
+}
+.batt-state {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: bold;
+}
+.batt-state.ok { background: #003300; color: var(--green); border: 1px solid #005500; }
+.batt-state.warn { background: #332200; color: var(--yellow); border: 1px solid #554400; }
+.batt-state.error { background: #330000; color: var(--red); border: 1px solid #550000; }
+/* Big numbers row */
+.big-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.big-metric {
+  text-align: center;
+  padding: 4px;
+  background: #0a0a0a;
+  border-radius: 4px;
+  border: 1px solid #1a1a1a;
+}
+.big-val {
+  font-size: 22px;
+  font-weight: bold;
+  line-height: 1.1;
+}
+.big-unit { font-size: 10px; color: #666; }
+.big-label { font-size: 8px; color: #555; text-transform: uppercase; letter-spacing: 1px; }
+/* SOC bar */
+.soc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.soc-label { font-size: 9px; color: #555; min-width: 24px; }
+.soc-track {
+  flex: 1;
+  height: 10px;
+  background: #111;
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid #222;
+}
+.soc-fill {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 0.5s ease;
+}
+.soc-pct { font-size: 12px; font-weight: bold; min-width: 38px; text-align: right; }
+/* Runtime estimation */
+.runtime-row {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px;
+  background: #050505;
+  border-radius: 4px;
+  border: 1px solid #1a1a1a;
+  margin-bottom: 6px;
+}
+.rt-icon { font-size: 12px; }
+.rt-val { font-size: 18px; font-weight: bold; }
+.rt-label { font-size: 9px; color: #555; }
+/* Amp meter gauge */
+.gauge-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.gauge-svg { width: 140px; height: 80px; }
+.gauge-val { font-size: 14px; font-weight: bold; margin-top: -2px; }
+.gauge-label { font-size: 8px; color: #555; text-transform: uppercase; }
+/* Secondary metrics */
+.secondary-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.sec-metric {
+  text-align: center;
+  padding: 3px;
+  background: #0a0a0a;
+  border-radius: 3px;
+  border: 1px solid #1a1a1a;
+}
+.sec-val { font-size: 12px; font-weight: bold; }
+.sec-label { font-size: 7px; color: #555; text-transform: uppercase; }
+/* Alert banner */
+.alert-banner {
+  display: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 6px;
+  animation: blink 1s infinite;
+}
+.alert-banner.active { display: block; }
+.alert-banner.warn { background: #332200; color: var(--yellow); border: 1px solid var(--yellow); }
+.alert-banner.crit { background: #330000; color: var(--red); border: 1px solid var(--red); }
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+/* Footer */
+.foot { font-size: 8px; color: #333; text-align: center; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="display-frame">
+  <!-- Status bar -->
+  <div class="status-row">
+    <span><span class="wifi-dot" id="wifiDot"></span><span id="wifiLabel">--</span></span>
+    <span id="uptimeLabel">0:00:00</span>
+    <span>CAN:<span id="canCount">0</span></span>
+  </div>
+
+  <!-- Alert banner (hidden unless triggered) -->
+  <div class="alert-banner" id="alertBanner"></div>
+
+  <!-- Battery header -->
+  <div class="batt-section" id="battSection">
+    <div class="batt-header">
+      <span class="batt-name" id="battName">Battery 1</span>
+      <span class="batt-state ok" id="battState">OK</span>
+    </div>
+
+    <!-- Amp gauge -->
+    <div class="gauge-section">
+      <svg class="gauge-svg" viewBox="0 0 140 80">
+        <!-- Background arc -->
+        <path d="M 15 72 A 55 55 0 0 1 125 72" fill="none" stroke="#1a1a1a" stroke-width="8" stroke-linecap="round"/>
+        <!-- Scale marks -->
+        <line x1="15" y1="72" x2="20" y2="67" stroke="#333" stroke-width="1"/>
+        <line x1="37" y1="30" x2="41" y2="34" stroke="#333" stroke-width="1"/>
+        <line x1="70" y1="17" x2="70" y2="22" stroke="#333" stroke-width="1"/>
+        <line x1="103" y1="30" x2="99" y2="34" stroke="#333" stroke-width="1"/>
+        <line x1="125" y1="72" x2="120" y2="67" stroke="#333" stroke-width="1"/>
+        <!-- Scale labels -->
+        <text x="12" y="80" fill="#444" font-size="7" font-family="monospace">0</text>
+        <text x="30" y="28" fill="#444" font-size="7" font-family="monospace">7</text>
+        <text x="67" y="14" fill="#444" font-size="7" font-family="monospace">15</text>
+        <text x="100" y="28" fill="#444" font-size="7" font-family="monospace">22</text>
+        <text x="120" y="80" fill="#444" font-size="7" font-family="monospace">30</text>
+        <!-- Active arc (colored) -->
+        <path id="gaugeArc" d="M 15 72 A 55 55 0 0 1 125 72" fill="none" stroke="#00ff41" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="172.79" stroke-dashoffset="172.79"/>
+        <!-- Needle -->
+        <line id="gaugeNeedle" x1="70" y1="72" x2="20" y2="72" stroke="#e0e0e0" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="70" cy="72" r="3" fill="#e0e0e0"/>
+      </svg>
+      <div class="gauge-val"><span id="ampVal">0.0</span><span class="big-unit">A</span></div>
+      <div class="gauge-label">Current Draw</div>
+    </div>
+
+    <!-- Big numbers: Voltage & Power -->
+    <div class="big-row">
+      <div class="big-metric">
+        <div class="big-val" id="voltVal" style="color:var(--green)">0.0</div>
+        <div class="big-unit">V</div>
+        <div class="big-label">Voltage</div>
+      </div>
+      <div class="big-metric">
+        <div class="big-val" id="powerVal" style="color:var(--yellow)">0.0</div>
+        <div class="big-unit">W</div>
+        <div class="big-label">Power</div>
+      </div>
+    </div>
+
+    <!-- SOC bar -->
+    <div class="soc-row">
+      <span class="soc-label">SOC</span>
+      <div class="soc-track"><div class="soc-fill" id="socFill" style="width:0%;background:var(--green)"></div></div>
+      <span class="soc-pct" id="socPct">--%</span>
+    </div>
+
+    <!-- Runtime -->
+    <div class="runtime-row">
+      <span class="rt-icon">&#9201;</span>
+      <span class="rt-val" id="rtVal">--:--</span>
+      <span class="rt-label">remaining</span>
+    </div>
+
+    <!-- Secondary: Temp, Total Power, Total Current -->
+    <div class="secondary-row">
+      <div class="sec-metric">
+        <div class="sec-val" id="temp1Val">--</div>
+        <div class="sec-label">Temp 1</div>
+      </div>
+      <div class="sec-metric">
+        <div class="sec-val" id="totalPwrVal">0</div>
+        <div class="sec-label">Tot Pwr W</div>
+      </div>
+      <div class="sec-metric">
+        <div class="sec-val" id="totalCurVal">0.0</div>
+        <div class="sec-label">Tot Cur A</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">eBike Monitor &mdash; ESP32 Display</div>
+</div>
+
+<script>
+// Connects via WebSocket to the same ESP32 for real-time data
+(function() {
+  const MAX_AMPS = 30;
+  const ARC_LEN = 172.79; // approx pi * 55
+
+  let ws = null;
+  let reconnectTimer = null;
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+    ws.onopen = () => { if (reconnectTimer) { clearInterval(reconnectTimer); reconnectTimer = null; } };
+    ws.onclose = () => { if (!reconnectTimer) reconnectTimer = setInterval(connect, 3000); };
+    ws.onerror = () => {};
+
+    ws.onmessage = (evt) => {
+      if (typeof evt.data !== 'string') return;
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'battery_update') updateBattery(msg.data);
+        if (msg.type === 'system_status') updateSystem(msg.data);
+        // Handle initial combined message
+        if (msg.batteries && msg.system) {
+          updateBattery(msg.batteries);
+          updateSystem(msg.system);
+        }
+      } catch(e) {}
+    };
+  }
+
+  function updateBattery(data) {
+    const batts = data.batteries || [];
+    if (batts.length === 0) return;
+    const b = batts[0]; // Primary battery for display
+
+    // Name & state
+    document.getElementById('battName').textContent = b.name || 'Battery ' + (b.id + 1);
+    const stateEl = document.getElementById('battState');
+    if (b.has_error) {
+      stateEl.textContent = 'ERR';
+      stateEl.className = 'batt-state error';
+    } else if (b.state_name) {
+      stateEl.textContent = b.state_name;
+      stateEl.className = 'batt-state ok';
+    } else {
+      stateEl.textContent = 'OK';
+      stateEl.className = 'batt-state ok';
+    }
+
+    // Voltage & power
+    const v = b.voltage || 0;
+    const c = Math.abs(b.current || 0);
+    const p = b.power || 0;
+    document.getElementById('voltVal').textContent = v.toFixed(1);
+    document.getElementById('powerVal').textContent = p.toFixed(0);
+
+    // Amp gauge
+    const pct = Math.min(c / MAX_AMPS, 1);
+    const angle = Math.PI * pct; // 0 to PI
+    document.getElementById('ampVal').textContent = c.toFixed(1);
+
+    // Arc color
+    const arc = document.getElementById('gaugeArc');
+    const offset = ARC_LEN * (1 - pct);
+    arc.setAttribute('stroke-dashoffset', offset);
+    arc.setAttribute('stroke', pct > 0.8 ? '#ff3333' : pct > 0.5 ? '#ffd700' : '#00ff41');
+
+    // Needle
+    const nx = 70 + 48 * Math.cos(Math.PI - angle);
+    const ny = 72 - 48 * Math.sin(angle);
+    const needle = document.getElementById('gaugeNeedle');
+    needle.setAttribute('x2', nx);
+    needle.setAttribute('y2', ny);
+
+    // SOC
+    const soc = b.soc || 0;
+    const maxSoc = b.max_soc || 0;
+    let socPct = 0;
+    if (maxSoc > 0) {
+      socPct = (soc / maxSoc) * 100;
+    }
+    const socFill = document.getElementById('socFill');
+    socFill.style.width = Math.min(socPct, 100) + '%';
+    socFill.style.background = socPct < 15 ? 'var(--red)' : socPct < 30 ? 'var(--yellow)' : 'var(--green)';
+    document.getElementById('socPct').textContent = maxSoc > 0 ? socPct.toFixed(0) + '%' : '--';
+
+    // Runtime estimation
+    let rtText = '--:--';
+    let rtColor = 'var(--green)';
+    if (c > 0.05 && maxSoc > 0 && soc > 0) {
+      const remainAh = soc / 1000;
+      const hours = remainAh / c;
+      const totalMin = Math.round(hours * 60);
+      if (totalMin >= 1 && totalMin <= 9999) {
+        const h = Math.floor(totalMin / 60);
+        const m = totalMin % 60;
+        rtText = h + 'h ' + String(m).padStart(2, '0') + 'm';
+        if (totalMin < 30) rtColor = 'var(--red)';
+        else if (totalMin < 60) rtColor = 'var(--yellow)';
+      }
+    }
+    const rtEl = document.getElementById('rtVal');
+    rtEl.textContent = rtText;
+    rtEl.style.color = rtColor;
+
+    // Temperature
+    document.getElementById('temp1Val').textContent =
+      b.temp1 != null && b.temp1 !== 0 ? b.temp1.toFixed(0) + '\u00B0C' : '--';
+
+    // Totals
+    document.getElementById('totalPwrVal').textContent = (data.total_power || 0).toFixed(0);
+    document.getElementById('totalCurVal').textContent = (data.total_current || 0).toFixed(1);
+
+    // Alerts
+    const alert = document.getElementById('alertBanner');
+    if (b.has_error) {
+      alert.textContent = 'FAULT DETECTED';
+      alert.className = 'alert-banner active crit';
+    } else if (socPct > 0 && socPct < 10) {
+      alert.textContent = 'LOW BATTERY';
+      alert.className = 'alert-banner active crit';
+    } else if (socPct > 0 && socPct < 20) {
+      alert.textContent = 'BATTERY LOW';
+      alert.className = 'alert-banner active warn';
+    } else if (c > MAX_AMPS * 0.9) {
+      alert.textContent = 'HIGH CURRENT';
+      alert.className = 'alert-banner active warn';
+    } else {
+      alert.className = 'alert-banner';
+    }
+  }
+
+  function updateSystem(data) {
+    const dot = document.getElementById('wifiDot');
+    const label = document.getElementById('wifiLabel');
+    if (data.wifi_connected) {
+      dot.className = 'wifi-dot on';
+      label.textContent = data.wifi_ssid || 'WiFi';
+    } else {
+      dot.className = 'wifi-dot off';
+      label.textContent = 'No WiFi';
+    }
+
+    if (data.uptime_ms != null) {
+      const s = Math.floor(data.uptime_ms / 1000);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      document.getElementById('uptimeLabel').textContent =
+        h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+    }
+
+    if (data.can_message_count != null) {
+      document.getElementById('canCount').textContent = data.can_message_count;
+    }
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

@@ -278,6 +278,103 @@ body {
     font-family: monospace;
 }
 
+/* Amp Gauge + Runtime Row */
+.amp-gauge-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-primary);
+    border-radius: 8px;
+}
+
+.amp-gauge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.amp-gauge-svg {
+    width: 120px;
+    height: 70px;
+}
+
+.amp-gauge-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-top: -0.25rem;
+    font-family: monospace;
+}
+
+.amp-gauge-unit {
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.amp-gauge-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.runtime-display {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.runtime-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--success-color);
+    font-family: monospace;
+}
+
+.runtime-display.runtime-warn .runtime-value {
+    color: var(--warning-color);
+}
+
+.runtime-display.runtime-low .runtime-value {
+    color: var(--danger-color);
+}
+
+.runtime-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 0.25rem;
+}
+
+.soc-bar-container {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-card);
+    border-radius: 3px;
+    margin-top: 0.5rem;
+    overflow: hidden;
+}
+
+.soc-bar {
+    height: 100%;
+    background: var(--success-color);
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.runtime-display.runtime-warn .soc-bar {
+    background: var(--warning-color);
+}
+
+.runtime-display.runtime-low .soc-bar {
+    background: var(--danger-color);
+}
+
 .battery-metrics {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
