@@ -764,12 +764,27 @@ class BatteryMonitor {
     const socValue = battery.soc || 0;
     const maxSoc = battery.max_soc || 0;
     let socDisplay;
+    let socPct = 0;
     if (maxSoc > 0) {
-      const pct = ((socValue / maxSoc) * 100).toFixed(1);
-      socDisplay = `${pct}% <span class="metric-unit">(${socValue}/${maxSoc} mAh)</span>`;
+      socPct = (socValue / maxSoc) * 100;
+      socDisplay = `${socPct.toFixed(1)}% <span class="metric-unit">(${socValue}/${maxSoc} mAh)</span>`;
     } else {
       socDisplay = `${socValue}`;
     }
+
+    // Runtime estimation
+    const runtime = this.estimateRuntime(battery);
+    const runtimeDisplay = this.formatRuntime(runtime);
+    const runtimeClass = runtime && runtime.totalMinutes < 30 ? 'runtime-low' :
+                         runtime && runtime.totalMinutes < 60 ? 'runtime-warn' : '';
+
+    // Amp gauge (max 30A for ACS712-30A)
+    const maxAmps = 30;
+    const currentAbs = Math.abs(battery.current || 0);
+    const gaugePct = this.ampGaugePercent(battery.current, maxAmps);
+    const gaugeAngle = 180 * gaugePct;
+    const gaugeColor = gaugePct > 0.8 ? 'var(--danger-color)' :
+                       gaugePct > 0.5 ? 'var(--warning-color)' : 'var(--success-color)';
 
     // Cell voltages display
     let cellVoltagesHTML = "";
@@ -801,6 +816,25 @@ class BatteryMonitor {
                 <div class="battery-status ${statusClass}">${statusText}</div>
             </div>
             ${packInfoHTML}
+            <div class="amp-gauge-row">
+                <div class="amp-gauge">
+                    <svg viewBox="0 0 120 70" class="amp-gauge-svg">
+                        <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke="var(--bg-card)" stroke-width="8" stroke-linecap="round"/>
+                        <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke="${gaugeColor}" stroke-width="8" stroke-linecap="round"
+                              stroke-dasharray="${Math.PI * 50}" stroke-dashoffset="${Math.PI * 50 * (1 - gaugePct)}"/>
+                        <line x1="60" y1="65" x2="${60 + 45 * Math.cos(Math.PI - gaugeAngle * Math.PI / 180)}" y2="${65 - 45 * Math.sin(gaugeAngle * Math.PI / 180)}"
+                              stroke="var(--text-primary)" stroke-width="2" stroke-linecap="round"/>
+                        <circle cx="60" cy="65" r="3" fill="var(--text-primary)"/>
+                    </svg>
+                    <div class="amp-gauge-value">${currentAbs.toFixed(1)}<span class="amp-gauge-unit">A</span></div>
+                    <div class="amp-gauge-label">Current Draw</div>
+                </div>
+                <div class="runtime-display ${runtimeClass}">
+                    <div class="runtime-value">${runtimeDisplay}</div>
+                    <div class="runtime-label">Est. Runtime</div>
+                    ${socPct > 0 ? `<div class="soc-bar-container"><div class="soc-bar" style="width:${Math.min(socPct, 100)}%"></div></div>` : ''}
+                </div>
+            </div>
             <div class="battery-metrics">
                 <div class="metric">
                     <span class="metric-label">Voltage</span>
@@ -825,6 +859,45 @@ class BatteryMonitor {
 
     return card;
   }
+
+
+  // ==========================================
+  // Runtime estimation from SOC + current draw
+  // ==========================================
+
+  estimateRuntime(battery) {
+    const current = Math.abs(battery.current || 0);
+    const socValue = battery.soc || 0;
+    const maxSoc = battery.max_soc || 0;
+
+    if (current < 0.05 || maxSoc <= 0 || socValue <= 0) {
+      return null; // Not enough data
+    }
+
+    // SOC values are in mAh; remaining capacity = socValue mAh
+    // Runtime (hours) = remaining mAh / (current * 1000) since current is in A
+    const remainingAh = socValue / 1000;
+    const hours = remainingAh / current;
+    const totalMinutes = Math.round(hours * 60);
+
+    if (totalMinutes < 1 || totalMinutes > 9999) return null;
+
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return { hours: h, minutes: m, totalMinutes };
+  }
+
+  formatRuntime(rt) {
+    if (!rt) return '--:--';
+    return `${rt.hours}h ${String(rt.minutes).padStart(2, '0')}m`;
+  }
+
+  // Compute amp gauge angle (0-180 degrees) for semicircle gauge
+  ampGaugePercent(current, maxAmps) {
+    const abs = Math.abs(current || 0);
+    return Math.min(abs / maxAmps, 1.0);
+  }
+
 
   /**
    * Parse D-power pack identifier format: YYDDMMSSSS
