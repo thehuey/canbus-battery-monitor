@@ -168,23 +168,36 @@ void WebServer::setupStaticFiles() {
         LOG_WARN("[WebServer] Failed to open SPIFFS root directory");
     }
 
-    // Serve index.html at root
+    // Build-time ETag for index.html (changes on each firmware compile)
+    static const char* INDEX_ETAG = "\"" __DATE__ " " __TIME__ "\"";
+
+    // Serve index.html at root with ETag / 304 support
     server_.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
         LOG_INFO("[WebServer] GET / from %s", request->client()->remoteIP().toString().c_str());
 
+        // Check If-None-Match for 304
+        if (request->hasHeader("If-None-Match")) {
+            if (request->header("If-None-Match") == INDEX_ETAG) {
+                request->send(304);
+                return;
+            }
+        }
+
+        const char* spiffs_path = nullptr;
         if (SPIFFS.exists("/web/index.html")) {
-            LOG_INFO("[WebServer] Serving /web/index.html");
-            AsyncWebServerResponse* response = request->beginResponse(SPIFFS, "/web/index.html", "text/html");
-            response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-            request->send(response);
+            spiffs_path = "/web/index.html";
         } else if (SPIFFS.exists("/index.html")) {
-            LOG_INFO("[WebServer] Serving /index.html");
-            AsyncWebServerResponse* response = request->beginResponse(SPIFFS, "/index.html", "text/html");
-            response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            spiffs_path = "/index.html";
+        }
+
+        if (spiffs_path) {
+            LOG_INFO("[WebServer] Serving %s", spiffs_path);
+            AsyncWebServerResponse* response = request->beginResponse(SPIFFS, spiffs_path, "text/html");
+            response->addHeader("Cache-Control", "no-cache");
+            response->addHeader("ETag", INDEX_ETAG);
             request->send(response);
         } else {
             LOG_WARN("[WebServer] No index.html found, serving fallback page");
-            // Fallback inline minimal page
             String html = "<!DOCTYPE html><html><head><title>eBike Monitor</title></head>"
                          "<body><h1>eBike Battery Monitor</h1>"
                          "<p>Web interface files not found. Upload filesystem with: pio run --target uploadfs</p>"
