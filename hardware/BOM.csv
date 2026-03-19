@@ -1,0 +1,88 @@
+Reference,Value,Package,Description,Manufacturer,MPN,Qty,Supplier,Notes
+"--- POWER SUPPLY ---",,,,,,,,
+F1,3A PTC Fuse,1812,Resettable polyfuse,Littelfuse,1812L300/33DR,1,LCSC/DigiKey,Input protection
+D1,SMBJ60A,SMB,TVS Diode 60V Standoff,Littelfuse,SMBJ60A,1,LCSC C123456,Clamp transients from battery
+Q1,SI2301,SOT-23,P-MOSFET -20V -2.8A,Vishay,SI2301CDS-T1-GE3,1,LCSC C10487,Reverse polarity protection
+D2,12V Zener,SOD-323,Zener Diode 12V,Nexperia,BZX384-C12,1,LCSC,Gate clamp for Q1
+C1,100uF/80V,10x10mm,Electrolytic Capacitor,Nichicon,UPW1J101MED,1,DigiKey,Input bulk capacitor
+C2,100nF/100V,1206,MLCC X7R,Samsung,CL31B104KBCNNNC,1,LCSC C1711,Input ceramic bypass
+U1,TPS54360,SOIC-8 EP,Buck Converter 60V 3.5A,Texas Instruments,TPS54360BDDAR,1,DigiKey/LCSC C181059,Stage 1: 60V→5V
+D3,SS340,SMA,Schottky Diode 3A 40V,Vishay,SS34,1,LCSC C85098,Buck catch diode
+L1,15uH/4A,8x8mm,Shielded Power Inductor,Bourns,SRN8040-150M,1,DigiKey,Buck output inductor
+C3,100uF/10V,6.3x5.4mm,Electrolytic Capacitor,Nichicon,UCA1A101MNL1GS,1,LCSC,5V bulk output
+C4,22uF/10V,1210,MLCC X5R,Samsung,CL32A226KAJNNNE,1,LCSC C12530,5V ceramic output
+C5,100nF,0805,MLCC X7R,Generic,CL21B104KBCNNNC,1,LCSC C49678,5V bypass
+C_BST,100nF,0805,MLCC X7R,Generic,,1,LCSC,Bootstrap cap for TPS54360
+R_TOP,49.9k 1%,0805,Feedback Resistor,Yageo,RC0805FR-0749K9L,1,LCSC,Sets output = 5.02V
+R_BOT,12.4k 1%,0805,Feedback Resistor,Yageo,RC0805FR-0712K4L,1,LCSC,Sets output = 5.02V
+R_COMP,30k,0805,Compensation Resistor,Generic,,1,LCSC,Type II compensation
+C_COMP1,3.3nF,0805,Compensation Capacitor,Generic,,1,LCSC,Type II compensation
+C_COMP2,47pF,0402,Compensation Capacitor,Generic,,1,LCSC,Type II compensation
+R_EN1,1M,0805,UVLO Resistor Upper,Generic,,1,LCSC,EN divider - sets turn-on ~20V
+R_EN2,270k,0805,UVLO Resistor Lower,Generic,,1,LCSC,EN divider
+U2,AMS1117-3.3,SOT-223,3.3V LDO 1A,AMS,AMS1117-3.3,1,LCSC C6186,Stage 2: 5V→3.3V
+C6,10uF,1206,MLCC X5R,Generic,,1,LCSC,LDO input cap
+C7,22uF,1206,MLCC X5R,Generic,,1,LCSC,LDO output cap
+C8,100nF,0805,MLCC X7R,Generic,,1,LCSC,LDO output bypass
+"--- ESP32 MODULE ---",,,,,,,,
+U3,ESP32-WROOM-32E,Module,WiFi+BT SoC Module,Espressif,ESP32-WROOM-32E-N4,1,LCSC C701342,Main MCU module
+R6,10k,0805,EN Pull-up,Generic,,1,LCSC,Reset pull-up
+R7,10k,0805,GPIO0 Pull-up,Generic,,1,LCSC,Boot mode pull-up
+C_EN,100nF,0805,EN Filter,Generic,,1,LCSC,Reset noise filter
+C9,100nF,0805,MCU Bypass,Generic,,1,LCSC,Close to 3V3 pin
+C10,10uF,0805,MCU Bulk,Generic,,1,LCSC,Close to 3V3 pin
+SW1,Reset,6x6mm,Tactile Switch,Generic,,1,LCSC,Reset button (EN to GND)
+SW2,Boot,6x6mm,Tactile Switch,Generic,,1,LCSC,Boot button (GPIO0 to GND)
+R8,1k,0805,LED Resistor,Generic,,1,LCSC,Status LED current limit
+LED1,Green,0805,Status LED,Generic,,1,LCSC,GPIO2 indicator
+"--- USB INTERFACE ---",,,,,,,,
+J9,USB-C,USB-C 16pin,USB Type-C Receptacle,Generic,TYPE-C-31-M-12,1,LCSC C165948,Programming/Debug
+U4,CH340C,SOP-16,USB-UART Bridge,WCH,CH340C,1,LCSC C84681,No crystal needed
+R_CC1,5.1k,0805,USB-C CC1,Generic,,1,LCSC,UFP identification
+R_CC2,5.1k,0805,USB-C CC2,Generic,,1,LCSC,UFP identification
+D5,USBLC6-2SC6,SOT-23-6,USB ESD Protection,STMicro,USBLC6-2SC6,1,LCSC C7519,D+/D- ESD clamp
+C11,100nF,0805,Auto-Reset DTR,Generic,,1,LCSC,DTR → EN coupling
+C12,100nF,0805,Auto-Reset RTS,Generic,,1,LCSC,RTS → GPIO0 coupling
+"--- CAN BUS INTERFACE ---",,,,,,,,
+U5,TJA1050,SOIC-8,CAN Transceiver,NXP,TJA1050T/CM,1,LCSC C4082,500kbps CAN transceiver
+C13,100nF,0805,CAN Bypass,Generic,,1,LCSC,Close to TJA1050 VCC
+R9,10k,0805,RX Divider Upper,Generic,,1,LCSC,5V→3.3V level shift
+R10,20k,0805,RX Divider Lower,Generic,,1,LCSC,5V→3.3V level shift
+J2,"3-pos, 3.81mm",3.81mm Screw Term,CAN Bus Connector,Phoenix Contact,1984617,1,DigiKey/LCSC,CANH/CANL/GND
+R11,120R,0805,CAN Termination,Generic,,1,LCSC,Bus termination
+JP1,2-pin header,2.54mm,Termination Jumper,Generic,,1,LCSC,Enable/disable 120Ω term
+D4,PESD2CAN,SOT-23,CAN ESD Protection,NXP,PESD2CAN,1,LCSC C101325,CANH/CANL TVS
+"--- CURRENT SENSING ---",,,,,,,,
+U6,ACS712-30A,SOIC-8,Hall Effect Current Sensor,Allegro,ACS712ELCTR-30A-T,1,DigiKey/LCSC,On-board 30A sensor
+C14,100nF,0805,ACS712 Bypass,Generic,,1,LCSC,Close to VCC pin 8
+C_F,1nF,0805,ACS712 Bandwidth Filter,Generic,,1,LCSC,FILTER pin 6
+J3,"2-pos, 5.08mm",5.08mm Screw Term,30A Current Path,Phoenix Contact,1935161,1,DigiKey,IP+/IP- (heavy duty)
+R12,10k 1%,0805,Batt1 Divider Upper,Generic,,1,LCSC,ACS712 VIOUT scaling
+R13,20k 1%,0805,Batt1 Divider Lower,Generic,,1,LCSC,ACS712 VIOUT scaling
+C15,100nF,0805,Batt1 ADC Filter,Generic,,1,LCSC,GPIO34 filter
+R18,10k 1%,0805,Batt2 Divider Upper,Generic,,1,LCSC,External ACS scaling
+R19,20k 1%,0805,Batt2 Divider Lower,Generic,,1,LCSC,External ACS scaling
+C17,100nF,0805,Batt2 ADC Filter,Generic,,1,LCSC,GPIO35 filter
+R20,10k 1%,0805,Batt3 Divider Upper,Generic,,1,LCSC,External ACS scaling
+R21,20k 1%,0805,Batt3 Divider Lower,Generic,,1,LCSC,External ACS scaling
+C18,100nF,0805,Batt3 ADC Filter,Generic,,1,LCSC,GPIO32 filter
+R22,10k 1%,0805,Batt4 Divider Upper,Generic,,1,LCSC,External ACS scaling
+R23,20k 1%,0805,Batt4 Divider Lower,Generic,,1,LCSC,External ACS scaling
+C19,100nF,0805,Batt4 ADC Filter,Generic,,1,LCSC,GPIO33 filter
+R24,10k 1%,0805,Batt5 Divider Upper,Generic,,1,LCSC,External ACS scaling
+R25,20k 1%,0805,Batt5 Divider Lower,Generic,,1,LCSC,External ACS scaling
+C20,100nF,0805,Batt5 ADC Filter,Generic,,1,LCSC,GPIO36 filter
+J4,3-pin header,2.54mm,External ACS712 Batt2,Generic,,1,LCSC,VCC/GND/VOUT
+J5,3-pin header,2.54mm,External ACS712 Batt3,Generic,,1,LCSC,VCC/GND/VOUT
+J6,3-pin header,2.54mm,External ACS712 Batt4,Generic,,1,LCSC,VCC/GND/VOUT
+J7,3-pin header,2.54mm,External ACS712 Batt5,Generic,,1,LCSC,VCC/GND/VOUT
+"--- VOLTAGE SENSING ---",,,,,,,,
+R14,190k 1%,0805,V-Sense Divider Upper,Yageo,RC0805FR-07190KL,1,LCSC,60V/20 = 3.0V at ADC
+R15,10k 1%,0805,V-Sense Divider Lower,Yageo,RC0805FR-0710KL,1,LCSC,GPIO39 voltage sense
+C16,100nF,0805,V-Sense Filter,Generic,,1,LCSC,GPIO39 filter
+"--- DISPLAY HEADER ---",,,,,,,,
+J8,4-pin header,2.54mm,I2C Display Connector,Generic,,1,LCSC,GND/3V3/SDA/SCL
+R16,4.7k,0805,I2C SDA Pull-up,Generic,,1,LCSC,SDA to 3V3
+R17,4.7k,0805,I2C SCL Pull-up,Generic,,1,LCSC,SCL to 3V3
+"--- MOUNTING ---",,,,,,,,
+H1-H4,M3 Mounting Hole,,Board mounting holes,N/A,,4,,Four corners
