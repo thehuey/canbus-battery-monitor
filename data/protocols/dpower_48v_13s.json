@@ -39,7 +39,7 @@
     {
       "can_id": 514,
       "can_id_hex": "0x202",
-      "name": "Pack Voltage",
+      "name": "pack_voltage_mv",
       "description": "Total pack voltage in millivolts (13S pack, valid range 46.8V–54.6V)",
       "period_ms": 100,
       "fields": [

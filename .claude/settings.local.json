@@ -5,7 +5,14 @@
       "Bash(pio run:*)",
       "Bash(git config:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: eBike Battery CANBUS Monitor\n\nCore firmware implementation for ESP32-based battery monitoring:\n- CAN bus driver \\(TWAI\\) for 500kbps communication\n- Battery manager supporting 1-5 battery modules\n- ACS712 current sensor interface\n- Voltage sensing with divider support\n- NVS-backed settings persistence\n- CAN message parsing and logging\n- Ring buffer utilities for data handling\n\nHardware documentation:\n- Pin assignments and wiring guide\n- Voltage divider calculations\n- Safety guidelines\n\nBuild system:\n- PlatformIO configuration\n- Multiple test environments\n- Dev container support\nEOF\n\\)\")",
-      "Bash(/home/node/.platformio/penv/bin/pio run:*)"
+      "Bash(/home/node/.platformio/penv/bin/pio run:*)",
+      "Bash(git fetch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr list:*)",
+      "Bash(ls:*)",
+      "Bash(git merge --no-commit --no-ff origin/claude/extended-can-messages-Jgt7U 2>&1 | head -30)"
     ]
   }
 }
