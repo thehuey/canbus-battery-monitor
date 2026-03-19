@@ -14,40 +14,34 @@
     (comment 4 "See BOM.csv for component sourcing")
   )
 
-  ;; This is a skeleton schematic file.
-  ;; Open in KiCad 7+ and place the components per SCHEMATIC.md.
-  ;;
-  ;; Recommended workflow:
-  ;; 1. Open this project in KiCad
-  ;; 2. Add symbols from the KiCad standard library:
-  ;;    - Espressif:ESP32-WROOM-32E (or ESP32-WROOM-32)
-  ;;    - Interface_CAN_LIN:TJA1050T
-  ;;    - Sensor_Current:ACS712xLCTR-30A
-  ;;    - Regulator_Switching:TPS54360
-  ;;    - Regulator_Linear:AMS1117-3.3
-  ;;    - Interface_USB:CH340C
-  ;;    - Connector_USB:USB_C_Receptacle_USB2.0
-  ;; 3. Wire per the net list in SCHEMATIC.md
-  ;; 4. Run ERC (Electrical Rules Check)
-  ;; 5. Assign footprints and generate netlist
-  ;; 6. Switch to PCB editor and lay out per PCB_LAYOUT.md
+  (text "SKELETON SCHEMATIC - Place components per SCHEMATIC.md\n\nWorkflow:\n1. Add symbols from KiCad standard library\n2. Wire per the net list in SCHEMATIC.md\n3. Run ERC (Electrical Rules Check)\n4. Assign footprints and generate netlist\n5. Switch to PCB editor and lay out per PCB_LAYOUT.md"
+    (at 25 30 0)
+    (effects (font (size 1.27 1.27)) (justify left))
+    (uuid a1b2c3d4-0001-0001-0001-000000000001)
+  )
 
-  ;; Hierarchical sheet labels for the major sections:
-  ;; Sheet 1: Power Supply (TPS54360 + AMS1117)
-  ;; Sheet 2: ESP32 + USB Interface
-  ;; Sheet 3: CAN Bus Interface (TJA1050)
-  ;; Sheet 4: Current Sensing (ACS712 x5)
-  ;; Sheet 5: Voltage Sensing + Display Header
+  (text "Required Symbols:\n- Espressif:ESP32-WROOM-32E\n- Interface_CAN_LIN:TJA1050T\n- Sensor_Current:ACS712xLCTR-30A\n- Regulator_Switching:TPS54360\n- Regulator_Linear:AMS1117-3.3\n- Interface_USB:CH340C\n- Connector_USB:USB_C_Receptacle_USB2.0"
+    (at 25 55 0)
+    (effects (font (size 1.27 1.27)) (justify left))
+    (uuid a1b2c3d4-0001-0001-0001-000000000002)
+  )
 
-  ;; Power flag symbols needed:
-  ;; PWR_FLAG on V_IN, V_5V, V_3V3, GND nets
+  (text "Suggested Sheet Layout:\n  Sheet 1: Power Supply (TPS54360 + AMS1117)\n  Sheet 2: ESP32 + USB Interface\n  Sheet 3: CAN Bus Interface (TJA1050)\n  Sheet 4: Current Sensing (ACS712 x5)\n  Sheet 5: Voltage Sensing + Display Header"
+    (at 25 85 0)
+    (effects (font (size 1.27 1.27)) (justify left))
+    (uuid a1b2c3d4-0001-0001-0001-000000000003)
+  )
 
-  ;; Net classes to assign after wiring:
-  ;; - HighCurrent: ACS712 IP+ and IP- nets (3.0mm trace)
-  ;; - Power_VIN: V_IN rail traces (1.0mm)
-  ;; - Power_5V: V_5V rail traces (0.8mm)
-  ;; - Power_3V3: V_3V3 rail traces (0.6mm)
-  ;; - CAN_Bus: CANH, CANL differential pair (0.25mm)
-  ;; - Default: all signal traces (0.2mm)
+  (text "Power Flags Needed:\n  PWR_FLAG on V_IN, V_5V, V_3V3, GND nets"
+    (at 25 110 0)
+    (effects (font (size 1.27 1.27)) (justify left))
+    (uuid a1b2c3d4-0001-0001-0001-000000000004)
+  )
+
+  (text "Net Classes (assign after wiring):\n  HighCurrent: ACS712 IP+/IP- nets (3.0mm trace)\n  Power_VIN: V_IN rail traces (1.0mm)\n  Power_5V: V_5V rail traces (0.8mm)\n  Power_3V3: V_3V3 rail traces (0.6mm)\n  CAN_Bus: CANH, CANL differential pair (0.25mm)\n  Default: all signal traces (0.2mm)"
+    (at 25 120 0)
+    (effects (font (size 1.27 1.27)) (justify left))
+    (uuid a1b2c3d4-0001-0001-0001-000000000005)
+  )
 
 )
