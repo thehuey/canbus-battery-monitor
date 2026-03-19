@@ -1,0 +1,101 @@
+(kicad_pcb (version 20221018) (generator pcbnew)
+
+  (general
+    (thickness 1.6)
+    (legacy_teardrops no)
+  )
+
+  (paper "A4")
+  (title_block
+    (title "eBike Battery CANBUS Monitor")
+    (date "2026-03-19")
+    (rev "1.0")
+  )
+
+  (layers
+    (0 "F.Cu" signal)
+    (31 "B.Cu" signal)
+    (32 "B.Adhes" user "B.Adhesive")
+    (33 "F.Adhes" user "F.Adhesive")
+    (34 "B.Paste" user)
+    (35 "F.Paste" user)
+    (36 "B.SilkS" user "B.Silkscreen")
+    (37 "F.SilkS" user "F.Silkscreen")
+    (38 "B.Mask" user "B.Mask")
+    (39 "F.Mask" user "F.Mask")
+    (44 "Edge.Cuts" user)
+    (45 "Margin" user)
+    (46 "B.CrtYd" user "B.Courtyard")
+    (47 "F.CrtYd" user "F.Courtyard")
+    (48 "B.Fab" user "B.Fabrication")
+    (49 "F.Fab" user "F.Fabrication")
+  )
+
+  (setup
+    (pad_to_mask_clearance 0.05)
+    (aux_axis_origin 0 0)
+    (grid_origin 0 0)
+    (pcbplotparams
+      (layerselection 0x00010fc_ffffffff)
+      (plot_on_all_layers_selection 0x0000000_00000000)
+      (disableapertmacros false)
+      (usegerberextensions true)
+      (usegerberattributes true)
+      (usegerberadvancedattributes true)
+      (creategerberjobfile true)
+      (geraborformat 4.6)
+      (svgprecision 4)
+      (excludeedgelayer true)
+      (plotframeref false)
+      (viasonmask false)
+      (mode 1)
+      (useauxorigin false)
+      (hpglpennumber 1)
+      (hpglpenspeed 20)
+      (hpglpendiameter 15.000000)
+      (dxfpolygonmode true)
+      (dxfimperialunits true)
+      (dxfusepcbnewfont true)
+      (psnegative false)
+      (psa4output false)
+      (plotreference true)
+      (plotvalue true)
+      (plotinvisibletext false)
+      (sketchpadsonfab false)
+      (subtractmaskfromsilk true)
+      (outputformat 1)
+      (mirror false)
+      (drillshape 0)
+      (scaleselection 1)
+      (outputdirectory "gerber/")
+    )
+  )
+
+  ;; Board outline - 80mm x 55mm with rounded corners
+  (gr_rect (start 0 0) (end 80 55) (layer "Edge.Cuts") (width 0.1))
+
+  ;; Mounting holes - M3, 3.5mm from edges
+  ;; H1: top-left
+  (gr_circle (center 3.5 3.5) (end 5.0 3.5) (layer "Edge.Cuts") (width 0.1))
+  ;; H2: top-right
+  (gr_circle (center 76.5 3.5) (end 78.0 3.5) (layer "Edge.Cuts") (width 0.1))
+  ;; H3: bottom-left
+  (gr_circle (center 3.5 51.5) (end 5.0 51.5) (layer "Edge.Cuts") (width 0.1))
+  ;; H4: bottom-right
+  (gr_circle (center 76.5 51.5) (end 78.0 51.5) (layer "Edge.Cuts") (width 0.1))
+
+  ;; Zone: Ground plane on B.Cu (bottom copper layer)
+  ;; To be added after component placement - fill entire board minus antenna keep-out
+
+  ;; NOTES (silkscreen text for assembly reference):
+  (gr_text "eBike Monitor v1.0" (at 40 53) (layer "F.SilkS")
+    (effects (font (size 1.2 1.2) (thickness 0.15)) (justify center))
+  )
+  (gr_text "20-60V DC" (at 5 28) (layer "F.SilkS")
+    (effects (font (size 0.8 0.8) (thickness 0.12)) (justify left))
+  )
+
+  ;; See PCB_LAYOUT.md for complete placement and routing guidelines.
+  ;; Import netlist from schematic after wiring is complete.
+
+)

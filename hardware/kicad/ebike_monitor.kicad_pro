@@ -1,0 +1,163 @@
+{
+  "board": {
+    "3dviewports": [],
+    "design_settings": {
+      "defaults": {
+        "board_outline_line_width": 0.1,
+        "copper_line_width": 0.2,
+        "copper_text_size_h": 1.5,
+        "copper_text_size_v": 1.5,
+        "copper_text_thickness": 0.3,
+        "other_line_width": 0.15,
+        "silk_line_width": 0.15,
+        "silk_text_size_h": 1.0,
+        "silk_text_size_v": 1.0,
+        "silk_text_thickness": 0.15
+      },
+      "diff_pair_dimensions": [],
+      "drc_exclusions": [],
+      "rules": {
+        "min_clearance": 0.2,
+        "min_track_width": 0.15,
+        "min_via_annular_width": 0.13,
+        "min_via_diameter": 0.6
+      },
+      "track_widths": [
+        0.2,
+        0.3,
+        0.5,
+        0.8,
+        1.0,
+        2.5,
+        3.0
+      ],
+      "via_dimensions": [
+        {
+          "diameter": 0.6,
+          "drill": 0.3
+        },
+        {
+          "diameter": 0.8,
+          "drill": 0.4
+        }
+      ]
+    },
+    "layer_presets": [],
+    "layers": {
+      "0": {
+        "color": "",
+        "name": "F.Cu",
+        "type": "signal",
+        "user_name": ""
+      },
+      "31": {
+        "color": "",
+        "name": "B.Cu",
+        "type": "signal",
+        "user_name": ""
+      }
+    }
+  },
+  "boards": [],
+  "cvpcb": {
+    "equivalence_files": []
+  },
+  "libraries": {
+    "pinned_footprint_libs": [],
+    "pinned_symbol_libs": []
+  },
+  "meta": {
+    "filename": "ebike_monitor.kicad_pro",
+    "version": 1
+  },
+  "net_settings": {
+    "classes": [
+      {
+        "clearance": 0.2,
+        "diff_pair_gap": 0.2,
+        "diff_pair_width": 0.25,
+        "name": "Default",
+        "track_width": 0.2,
+        "via_diameter": 0.6,
+        "via_drill": 0.3
+      },
+      {
+        "clearance": 0.3,
+        "name": "Power_5V",
+        "track_width": 0.8,
+        "via_diameter": 0.8,
+        "via_drill": 0.4
+      },
+      {
+        "clearance": 0.3,
+        "name": "Power_3V3",
+        "track_width": 0.6,
+        "via_diameter": 0.8,
+        "via_drill": 0.4
+      },
+      {
+        "clearance": 0.5,
+        "name": "Power_VIN",
+        "track_width": 1.0,
+        "via_diameter": 0.8,
+        "via_drill": 0.4
+      },
+      {
+        "clearance": 0.5,
+        "name": "HighCurrent",
+        "track_width": 3.0,
+        "via_diameter": 0.8,
+        "via_drill": 0.4
+      },
+      {
+        "clearance": 0.2,
+        "diff_pair_gap": 0.2,
+        "diff_pair_width": 0.25,
+        "name": "CAN_Bus",
+        "track_width": 0.25,
+        "via_diameter": 0.6,
+        "via_drill": 0.3
+      }
+    ],
+    "net_colors": null
+  },
+  "pcbnew": {
+    "last_paths": {
+      "gencad": "",
+      "idf": "",
+      "netlist": "",
+      "specctra_dsn": "",
+      "step": "",
+      "vrml": ""
+    },
+    "page_layout_descr_file": ""
+  },
+  "schematic": {
+    "annotate_start_num": 1,
+    "drawing": {
+      "default_line_thickness": 0.15,
+      "default_text_size": 1.27,
+      "field_names": [],
+      "intersheets_ref_prefix": "",
+      "intersheets_ref_short": false,
+      "intersheets_ref_show": false,
+      "intersheets_ref_suffix": "",
+      "pin_symbol_size": 0.0,
+      "text_offset_ratio": 0.08
+    },
+    "page_layout_descr_file": ""
+  },
+  "sheets": [
+    [
+      "cfe4d633-3c81-4b3d-9c44-a8f7afb5ffc0",
+      ""
+    ]
+  ],
+  "text_variables": {
+    "TITLE": "eBike Battery CANBUS Monitor",
+    "REVISION": "1.0",
+    "COMPANY": "",
+    "COMMENT1": "ESP32 + TJA1050 + ACS712 + TPS54360",
+    "COMMENT2": "20-60V Input, CAN 500kbps"
+  }
+}
